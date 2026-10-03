@@ -48,12 +48,10 @@
     .panel-head { min-height:58px; display:flex; align-items:center; justify-content:space-between; gap:12px; padding:0 20px; border-bottom:1px solid #eaf0f5; }
     .panel-body { padding:20px; }
     .tag { color:#8190a4; font-size:11px; font-weight:660; }
-    .chart-panel { margin-bottom:20px; }
-    .chart-wrap { height:230px; padding:16px 20px 7px; }
-    #activity-chart { width:100%; height:100%; display:block; }
-    .legend { display:flex; gap:18px; align-items:center; color:#7889a0; font-size:11px; }
-    .legend i { display:inline-block; width:8px; height:8px; border-radius:2px; margin-right:5px; }
-    .overview-grid { display:grid; grid-template-columns:minmax(0,1.55fr) minmax(275px,.8fr); gap:20px; align-items:start; }
+    .overview-flow { display:grid; gap:20px; }
+    .summary-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:20px; align-items:stretch; }
+    .details-grid { display:grid; grid-template-columns:minmax(0,1.85fr) minmax(280px,.8fr); gap:20px; align-items:start; }
+    .telegram-health { display:flex; align-items:center; gap:9px; padding:3px 0 9px; font-size:13px; font-weight:730; color:#283e5b; }
     .stack { display:grid; gap:20px; }
     .source-line { display:flex; justify-content:space-between; gap:15px; padding:11px 0; border-bottom:1px solid #edf1f5; font-size:12px; }
     .source-line:last-child { border:0; }
@@ -116,7 +114,8 @@
     .auth-body p { color:#6e8099; font-size:13px; line-height:1.55; margin-bottom:23px; }
     .auth-status { display:flex; gap:9px; align-items:flex-start; padding:13px 14px; border:1px solid #e5ebf2; border-radius:7px; color:#60738d; background:#f8fafc; font-size:11px; line-height:1.5; margin-top:17px; }
     .auth-status .dot { margin-top:4px; flex:none; }
-    @media (max-width:1150px) { .cards { grid-template-columns:repeat(2,1fr); } .overview-grid,.settings-grid { grid-template-columns:1fr; } }
+    @media (max-width:1250px) { .details-grid { grid-template-columns:1fr; } }
+    @media (max-width:1150px) { .cards { grid-template-columns:repeat(2,1fr); } .settings-grid { grid-template-columns:1fr; } }
     @media (max-width:700px) {
       .sidebar { position:static; width:auto; height:auto; padding:13px 15px; }
       .brand { padding:0 0 12px; } .side-caption,.side-foot { display:none; }
@@ -125,7 +124,7 @@
       .content { padding:24px 16px 40px; }.page-head { align-items:flex-start; }.live-status { font-size:11px; }
       .cards { gap:9px; }.card { min-height:94px; padding:13px; }.card strong { font-size:22px; }
       .field-row { grid-template-columns:1fr; gap:0; }.panel-body { padding:16px; }
-      .chart-wrap { height:190px; }.auth-body { padding:27px 24px 30px; }
+      .summary-grid { grid-template-columns:1fr; }.auth-body { padding:27px 24px 30px; }
     }
   </style>
 </head>
@@ -155,7 +154,7 @@
       <div class="side-foot"><b>Локальная панель</b>Данные сеанса остаются на этом компьютере</div>
     </aside>
     <main class="main">
-      <div class="topbar"><span class="breadcrumb">Пульс / <b id="breadcrumb">Обзор</b></span><div class="top-right"><button class="button neutral small" type="button" id="connect-pulse">Подключить Пульс</button><span>Брокерские заявки отключены</span><span class="badge">ДЕМО ИСПОЛНЕНИЕ</span></div></div>
+      <div class="topbar"><span class="breadcrumb">Пульс / <b id="breadcrumb">Обзор</b></span><div class="top-right"><button class="button neutral small" type="button" id="connect-pulse">Подключить Пульс</button><span>Брокерские заявки отключены</span><span class="badge" id="mode-badge">Режим: демо</span></div></div>
       <div class="content">
         <section class="view active" id="view-overview">
           <div class="page-head"><div><h1>Обзор</h1><p class="subtle" id="profile-heading">Профиль Пульса</p></div><div class="live-status"><i class="dot" id="source-dot"></i><span id="source-status">Подключение</span></div></div>
@@ -165,22 +164,21 @@
             <div class="card"><span class="card-label">Наши покупки · демо</span><strong id="our-buys">0</strong><small>Без реальных заявок</small></div>
             <div class="card"><span class="card-label">Инструменты профиля</span><strong id="instrument-total">0</strong><small>Доступны для просмотра</small></div>
           </div>
-          <section class="panel chart-panel"><div class="panel-head"><h2>Активность за 24 часа</h2><div class="legend"><span><i style="background:#477eb9"></i>Автор</span><span><i style="background:#e7b14b"></i>Наше демо</span></div></div><div class="chart-wrap"><svg id="activity-chart" role="img" aria-label="График сделок за 24 часа"></svg></div></section>
-          <div class="overview-grid">
-            <div class="stack">
-              <section class="panel"><div class="panel-head"><h2>Сделки автора за 24 часа</h2><span class="tag" id="today-count">0 сделок</span></div><div id="today-list" class="empty">Сделки пока не загружены</div></section>
-              <section class="panel"><div class="panel-head"><h2>Инструменты профиля</h2><span class="tag" id="instrument-count">0 инструментов</span></div><div class="panel-body"><input class="search" id="instrument-search" type="search" placeholder="Поиск по тикеру или названию" aria-label="Поиск инструмента"></div><div id="instrument-list" class="empty">Данные появятся после входа</div><div class="panel-body"><button class="button neutral small" type="button" id="instrument-more" hidden>Показать ещё</button></div><div id="history-panel" hidden><div class="panel-head"><h2 id="history-title">История</h2><button type="button" class="link" id="history-close">Закрыть</button></div><div id="history-list" class="empty"></div><div class="panel-body"><button class="button neutral small" type="button" id="history-more" hidden>Показать ещё</button></div></div></section>
-            </div>
-            <div class="stack">
+          <div class="overview-flow">
+            <div class="summary-grid">
               <section class="panel"><div class="panel-head"><h2>Источник</h2><span class="tag">Пульс</span></div><div class="panel-body">
                 <div class="source-line"><span>Профиль</span><b id="source-profile">—</b></div>
                 <div class="source-line"><span>Режим</span><b id="source-mode">—</b></div>
                 <div class="source-line"><span>Последняя проверка</span><b id="last-check">—</b></div>
-                <div class="source-line"><span>Telegram</span><b id="telegram-summary">—</b></div>
                 <p class="muted space-top" id="source-message">Подключаемся к Пульсу…</p>
                 <button class="button neutral small space-top" id="refresh-source" type="button">Проверить данные</button>
               </div></section>
-              <section class="panel"><div class="panel-head"><h2>Наш результат</h2><span class="tag">Только демо</span></div><div class="panel-body"><p class="subtle">Покупки, отмеченные ниже, созданы для проверки сценария. Денежные средства и позиции брокерского счёта не подключены.</p><div class="source-line space-top"><span>Тестовых операций</span><b id="demo-total">0</b></div><div class="source-line"><span>Уведомления</span><b id="notification-status">—</b></div></div></section>
+              <section class="panel"><div class="panel-head"><h2>Наш результат</h2><span class="tag">Только демо</span></div><div class="panel-body"><p class="subtle">Покупки, отмеченные ниже, созданы для проверки сценария. Денежные средства и позиции брокерского счёта не подключены.</p><div class="source-line space-top"><span>Тестовых операций</span><b id="demo-total">0</b></div><div class="source-line"><span>Брокерские заявки</span><b>Не выставлялись</b></div></div></section>
+            </div>
+            <section class="panel"><div class="panel-head"><h2>Сделки автора за 24 часа</h2><span class="tag" id="today-count">0 сделок</span></div><div id="today-list" class="empty">Сделки пока не загружены</div></section>
+            <div class="details-grid">
+              <section class="panel"><div class="panel-head"><h2>Инструменты профиля</h2><span class="tag" id="instrument-count">0 инструментов</span></div><div class="panel-body"><input class="search" id="instrument-search" type="search" placeholder="Поиск по тикеру или названию" aria-label="Поиск инструмента"></div><div id="instrument-list" class="empty">Данные появятся после входа</div><div class="panel-body"><button class="button neutral small" type="button" id="instrument-more" hidden>Показать ещё</button></div><div id="history-panel" hidden><div class="panel-head"><h2 id="history-title">История</h2><button type="button" class="link" id="history-close">Закрыть</button></div><div id="history-list" class="empty"></div><div class="panel-body"><button class="button neutral small" type="button" id="history-more" hidden>Показать ещё</button></div></div></section>
+              <section class="panel"><div class="panel-head"><h2>Telegram-бот</h2><span class="tag">Уведомления</span></div><div class="panel-body"><div class="telegram-health"><i class="dot" id="telegram-dot"></i><strong id="telegram-state">Проверяем настройки</strong></div><div class="source-line"><span>Получатель</span><b id="telegram-recipient">—</b></div><div class="source-line"><span>Токен</span><b id="telegram-token-state">—</b></div><p class="muted space-top" id="telegram-note">Сообщения отправляются только на указанный ID.</p></div></section>
             </div>
           </div>
         </section>
@@ -278,23 +276,6 @@
       catch (error) { el('source-message').textContent = error.message; }
       finally { setTimeout(() => button.disabled = false, 3000); }
     });
-    function renderChart() {
-      const svg = el('activity-chart'); svg.replaceChildren();
-      const now = new Date(), start = now.getTime() - 24*3600*1000;
-      const source = Array(24).fill(0), ours = Array(24).fill(0);
-      for (const trade of today) { const t = new Date(trade.tradeDateTime).getTime(); const i = Math.floor((t-start)/3600000); if(i>=0&&i<24) source[i]++; }
-      for (const event of events) { if(event.trade !== 'ДЕМО: куплено') continue; const t = new Date(event.time).getTime(); const i = Math.floor((t-start)/3600000); if(i>=0&&i<24) ours[i]++; }
-      const max = Math.max(1,...source,...ours), ns='http://www.w3.org/2000/svg', width=1000, top=15, bottom=178;
-      svg.setAttribute('viewBox','0 0 1000 205');
-      function node(tag, attrs) { const n=document.createElementNS(ns,tag); for(const [k,v] of Object.entries(attrs)) n.setAttribute(k,v); svg.append(n); return n; }
-      for(let level=0;level<=3;level++){const y=bottom-level*(bottom-top)/3;node('line',{x1:23,y1:y,x2:990,y2:y,stroke:'#e7edf4','stroke-width':1});}
-      for(let i=0;i<24;i++){
-        const x=27+i*40; const hs=source[i]/max*150, ho=ours[i]/max*150;
-        node('rect',{x,y:bottom-hs,width:13,height:Math.max(hs,source[i]?2:0),rx:2,fill:'#477eb9'});
-        node('rect',{x:x+15,y:bottom-ho,width:13,height:Math.max(ho,ours[i]?2:0),rx:2,fill:'#e7b14b'});
-        if(i%4===0 || i===23){const label=node('text',{x:x+8,y:198,fill:'#8d9caf','font-size':11,'text-anchor':'middle'});label.textContent=new Date(start+i*3600000).getHours().toString().padStart(2,'0')+':00';}
-      }
-    }
     function renderToday() {
       const box=el('today-list'); box.replaceChildren(); el('today-count').textContent=today.length+' сделок';
       if(!today.length){box.className='empty';box.textContent='За последние 24 часа опубликованных сделок не найдено';return;}
@@ -352,6 +333,7 @@
       const profile=new URL(state.settings.profile_url).pathname.split('/').filter(Boolean).at(-1);
       el('profile-heading').textContent=profile+' · профиль Пульса';el('source-profile').textContent=profile;
       el('source-mode').textContent=state.settings.monitoring_enabled?'Живой мониторинг':'Демо';
+      el('mode-badge').textContent=state.settings.monitoring_enabled?'Режим: мониторинг':'Режим: демо';
       el('source-status').textContent=state.auth.status!=='authenticated'?'Пульс не подключён':state.monitor.status==='error'?'Нужна проверка':state.settings.monitoring_enabled?'Мониторинг включён':'Мониторинг выключен';
       el('source-dot').className='dot'+(state.auth.status!=='authenticated'||state.monitor.status==='error'?' bad':state.monitor.status==='running'?' good':'');
       el('last-check').textContent=state.monitor.last_check?fmtDate(state.monitor.last_check):'—';
@@ -360,11 +342,16 @@
       const demos=events.filter(item=>item.trade==='ДЕМО: куплено');
       el('source-buys').textContent=buys;el('source-sells').textContent=sells;el('our-buys').textContent=demos.length;el('demo-total').textContent=demos.length;
       tokenConfigured=state.token_configured;
-      el('telegram-summary').textContent=!state.settings.chat_id?'ID не указан':!tokenConfigured?'Нет токена':state.settings.paused?'Пауза':'Готов';
-      el('notification-status').textContent=state.settings.paused?'Пауза':state.settings.chat_id&&tokenConfigured?'Включены':'Выключены';
+      const hasRecipient=Boolean(state.settings.chat_id);
+      const botReady=tokenConfigured&&hasRecipient&&!state.settings.paused;
+      el('telegram-state').textContent=state.settings.paused?'На паузе':!hasRecipient?'ID не указан':!tokenConfigured?'Токен не задан':'Активен';
+      el('telegram-dot').className='dot'+(botReady?' good':' bad');
+      el('telegram-recipient').textContent=hasRecipient?'ID '+state.settings.chat_id:'Не указан';
+      el('telegram-token-state').textContent=tokenConfigured?'Сохранён':'Не задан';
+      el('telegram-note').textContent=state.settings.paused?'Отправка уведомлений приостановлена.':!hasRecipient?'Без ID получателя бот ничего не отправляет.':!tokenConfigured?'Укажи токен бота в настройках.':'Сообщения отправляются только на указанный ID.';
       el('bot-summary').textContent=tokenConfigured?'Токен сохранён':'Токен не задан';
       el('token-hint').textContent=tokenConfigured?'Токен сохранён локально; введи новый, чтобы заменить':'Токен хранится только локально и не показывается';
-      renderChart();renderToday();renderInstruments();renderEvents();
+      renderToday();renderInstruments();renderEvents();
     }
     async function refresh(){renderState(await api('/api/state'));}
     async function load(){
