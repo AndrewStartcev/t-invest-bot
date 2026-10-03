@@ -1,8 +1,13 @@
 import tempfile
+import threading
 import unittest
+import json
+import queue
 from datetime import datetime, timedelta, timezone
+from http.server import ThreadingHTTPServer
 from pathlib import Path
 from unittest.mock import patch
+from urllib.request import Request, urlopen
 
 import demo_admin
 from pulse_live import operations_url, with_cursor
@@ -25,6 +30,28 @@ class FakeBrowser:
 
 
 class LiveMonitorTests(unittest.TestCase):
+    def test_auth_button_queues_one_open_without_waiting_for_browser(self):
+        requests = queue.Queue()
+        auth = {"status": "required", "message": "Нужен вход"}
+        with patch.object(demo_admin, "HISTORY_REQUESTS", requests), patch.object(demo_admin, "AUTH", auth):
+            server = ThreadingHTTPServer(("127.0.0.1", 0), demo_admin.Handler)
+            worker = threading.Thread(target=server.serve_forever, daemon=True)
+            worker.start()
+            try:
+                url = f"http://127.0.0.1:{server.server_port}/api/auth/start"
+                request = Request(url, data=b"{}", headers={"Content-Type": "application/json"})
+                with urlopen(request, timeout=2) as response:
+                    self.assertEqual(response.status, 202)
+                    self.assertTrue(json.load(response)["ok"])
+                with urlopen(request, timeout=2) as response:
+                    self.assertEqual(response.status, 202)
+                self.assertEqual(requests.qsize(), 1)
+                self.assertEqual(auth["status"], "opening")
+            finally:
+                server.shutdown()
+                server.server_close()
+                worker.join(timeout=2)
+
     def test_profile_and_cursor(self):
         self.assertEqual(operations_url("https://www.tbank.ru/invest/social/profile/LinMath/")[0], "LinMath")
         self.assertIn("nextCursor=next", with_cursor("https://www.tbank.ru/example?sessionId=secret", "next"))

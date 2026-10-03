@@ -134,8 +134,9 @@
       <div class="auth-body">
         <span class="eyebrow">Доступ к данным</span>
         <h1>Авторизуйся в Пульсе для работы</h1>
-        <p>Откроется отдельное окно Т-Банка. Войди в свой аккаунт — после проверки сделок откроется админка. Вход сохранится только на этом компьютере.</p>
+        <p>Откроется отдельное окно Т-Банка. Войди в аккаунт и открой сделки. Если админка не появилась, нажми «Проверить вход». Окно Пульса нужно оставить открытым для мониторинга.</p>
         <button class="button wide" type="button" id="auth-button">Открыть окно Пульса</button>
+        <button class="button neutral wide" type="button" id="auth-show" hidden>Показать окно Пульса</button>
         <div class="auth-status"><span class="dot" id="auth-dot"></span><span id="auth-message">Проверяем сохранённый вход…</span></div>
       </div>
     </div>
@@ -207,7 +208,7 @@
   </div>
   <script>
     const el = id => document.getElementById(id);
-    let liveMode = false, instruments = [], today = [], events = [], selected = null, historyCursor = null, tokenConfigured = false;
+    let liveMode = false, instruments = [], today = [], events = [], selected = null, historyCursor = null, tokenConfigured = false, authStatus = 'checking';
     const tabs = [...document.querySelectorAll('[data-view]')];
     const pages = [...document.querySelectorAll('.view')];
     const names = {overview:'Обзор',settings:'Настройки',journal:'Журнал'};
@@ -233,6 +234,7 @@
     el('mode-live').addEventListener('click', () => setMode(true));
     function fmtDate(value) { try { return new Date(value).toLocaleString('ru-RU'); } catch { return '—'; } }
     function renderAuth(auth) {
+      authStatus = auth.status;
       const ready = auth.status === 'authenticated';
       el('auth-screen').hidden = ready;
       el('admin-app').inert = !ready;
@@ -240,16 +242,27 @@
       el('auth-summary').textContent = ready ? 'Авторизован' : auth.status === 'waiting' ? 'Ожидаем входа' : 'Нужен вход';
       el('auth-message').textContent = auth.message || 'Ожидаем входа';
       el('auth-dot').className = 'dot' + (ready ? ' good' : auth.status === 'required' ? ' bad' : '');
-      el('auth-button').textContent = auth.status === 'waiting' ? 'Показать окно входа' : 'Открыть окно Пульса';
+      el('auth-button').textContent = auth.status === 'waiting' ? 'Проверить вход' : auth.status === 'opening' ? 'Открываем окно…' : 'Открыть окно Пульса';
+      el('auth-button').disabled = auth.status === 'opening';
+      el('auth-show').hidden = auth.status !== 'waiting';
     }
     async function startAuth() {
       el('auth-button').disabled = true;
-      try { await api('/api/auth/start', {}); el('auth-message').textContent = 'Окно открыто. Нажми «Войти» на странице Т-Банка.'; }
+      try {
+        if (authStatus === 'waiting') {
+          await api('/api/auth/check', {});
+          el('auth-message').textContent = 'Проверяем список сделок без открытия нового окна…';
+        } else {
+          await api('/api/auth/start', {});
+          el('auth-message').textContent = 'Открываем окно Пульса…';
+        }
+      }
       catch (error) { el('auth-message').textContent = error.message; }
       finally { el('auth-button').disabled = false; }
     }
     el('auth-button').addEventListener('click', startAuth);
-    el('open-pulse').addEventListener('click', startAuth);
+    el('auth-show').addEventListener('click', () => api('/api/auth/start', {}).catch(error => el('auth-message').textContent = error.message));
+    el('open-pulse').addEventListener('click', () => api('/api/auth/start', {}).catch(error => el('settings-message').textContent = error.message));
     function renderChart() {
       const svg = el('activity-chart'); svg.replaceChildren();
       const now = new Date(), start = now.getTime() - 24*3600*1000;

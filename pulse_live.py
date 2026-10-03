@@ -95,9 +95,18 @@ class PulseBrowser:
             self.request_headers = {key: value for key, value in headers.items()
                                     if key.lower() in {"x-app-name", "x-app-version", "x-platform", "referer"}}
 
+    def refresh(self, profile_url: str) -> None:
+        _, url = operations_url(profile_url)
+        pages = [page for page in self.context.pages if not page.is_closed() and page.url.split("?")[0] == url]
+        if not pages:
+            raise PulseError("Открой страницу «Сделки» выбранного профиля в окне Пульса")
+        self.page = pages[-1]
+        self.list_url = None
+        self.observed_api.clear()
+        self.page.reload(wait_until="commit", timeout=45000)
+
     def snapshot(self, profile_url: str, counts: dict[str, int]) -> tuple[str, list[dict]]:
         name, url = operations_url(profile_url)
-        just_opened = self.page is None
         if self.page is None:
             self.open(profile_url)
         for page in self.context.pages:
@@ -106,15 +115,11 @@ class PulseBrowser:
                 break
         if self.page.url.split("?")[0] != url:
             raise PulseError("Заверши вход в Т-Банк и вернись на страницу «Сделки» в окне мониторинга")
-        if not just_opened:
-            self.list_url = None
-            self.observed_api.clear()
-            self.page.reload(wait_until="commit", timeout=45000)
         deadline = time.monotonic() + 15
         while not self.list_url and time.monotonic() < deadline:
             if self.page.is_closed():
                 raise PulseError("Окно Пульса закрыто. Выключи и снова включи мониторинг")
-            time.sleep(0.25)
+            self.page.wait_for_timeout(250)
         if not self.list_url:
             seen = len(self.observed_api)
             raise PulseError(f"Сделки не загрузились (ответов API Пульса: {seen}). Открой раздел «Сделки» в окне Пульса")

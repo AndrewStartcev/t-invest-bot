@@ -255,15 +255,26 @@ def monitor_loop() -> None:
                     next_poll = 0
                     with LOCK:
                         AUTH.update(status="waiting", message="Войди в Т-Банк в открытом окне. Проверка выполнится автоматически")
-                    request["result"] = {"ok": True}
+                elif request["action"] == "auth_check":
+                    if browser:
+                        browser.refresh(settings["profile_url"])
+                        next_poll = 0
+                    else:
+                        with LOCK:
+                            AUTH.update(status="required", message="Окно Пульса закрыто. Открой его снова")
                 elif request["action"] == "history" and browser and AUTH["status"] == "authenticated":
                     request["result"] = browser.history(request["ticker"], request["class_code"], request["cursor"])
                 else:
                     request["error"] = "Сначала авторизуйся в Пульсе"
             except Exception as error:
-                request["error"] = str(error) if isinstance(error, PulseError) else "Окно Пульса не открылось"
+                if request["action"] == "history":
+                    request["error"] = str(error) if isinstance(error, PulseError) else "История не загрузилась"
+                else:
+                    with LOCK:
+                        AUTH.update(status="required", message=str(error) if isinstance(error, PulseError) else f"Окно Пульса не открылось ({type(error).__name__})")
             finally:
-                request["ready"].set()
+                if "ready" in request:
+                    request["ready"].set()
 
         if browser is None and AUTH["status"] == "checking":
             try:
@@ -273,6 +284,19 @@ def monitor_loop() -> None:
                 with LOCK:
                     AUTH.update(status="required", message=str(error) if isinstance(error, PulseError) else f"Не удалось проверить сохранённый вход ({type(error).__name__})")
                 browser = None
+
+        if browser and AUTH["status"] in {"waiting", "required"} and not browser.list_url:
+            try:
+                browser.page.wait_for_timeout(250)
+            except Exception as error:
+                with LOCK:
+                    AUTH.update(status="required", message=f"Окно Пульса закрыто ({type(error).__name__})")
+                try:
+                    browser.close()
+                except Exception:
+                    pass
+                browser = None
+            continue
 
         if browser and time.monotonic() >= next_poll:
             try:
@@ -286,7 +310,7 @@ def monitor_loop() -> None:
                 with LOCK:
                     MONITOR.update(status="error", message=message)
                     if login_needed or AUTH["status"] in {"checking", "waiting"}:
-                        AUTH.update(status="waiting" if not browser.headless else "required", message="Нужен вход в Пульс")
+                        AUTH.update(status="waiting" if not browser.headless else "required", message=message)
                 if not isinstance(error, PulseError):
                     with LOCK:
                         AUTH.update(status="checking", message="Повторно проверяем вход в Пульс")
@@ -349,7 +373,7 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError("Нужен объект JSON")
             with LOCK:
                 authenticated = AUTH["status"] == "authenticated"
-            if not authenticated and self.path not in {"/api/auth/start", "/api/browser/show"}:
+            if not authenticated and self.path not in {"/api/auth/start", "/api/browser/show", "/api/auth/check"}:
                 self.respond(403, {"error": "Сначала авторизуйся в Пульсе"})
                 return
             if self.path == "/api/settings":
@@ -389,14 +413,17 @@ class Handler(BaseHTTPRequestHandler):
                 else:
                     self.respond(200, request["result"])
             elif self.path in {"/api/browser/show", "/api/auth/start"}:
-                request = {"action": "auth_start", "ready": threading.Event()}
-                HISTORY_REQUESTS.put(request)
-                if not request["ready"].wait(30):
-                    self.respond(503, {"error": "Окно браузера ещё запускается"})
-                elif "error" in request:
-                    self.respond(503, {"error": request["error"]})
-                else:
-                    self.respond(200, request["result"])
+                with LOCK:
+                    if AUTH["status"] != "opening":
+                        AUTH.update(status="opening", message="Открываем окно Пульса…")
+                        HISTORY_REQUESTS.put({"action": "auth_start"})
+                self.respond(202, {"ok": True})
+            elif self.path == "/api/auth/check":
+                with LOCK:
+                    if AUTH["status"] != "checking":
+                        AUTH.update(status="checking", message="Проверяем сделки Пульса…")
+                        HISTORY_REQUESTS.put({"action": "auth_check"})
+                self.respond(202, {"ok": True})
             elif self.path == "/api/demo/buy":
                 candidate_id = data.get("id")
                 with LOCK:
