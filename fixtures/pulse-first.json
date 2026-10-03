@@ -1,0 +1,6 @@
+{
+  "profile": "demo-author",
+  "trades": [
+    {"id": "example-001", "instrument": "DEMO", "side": "BUY", "time": "2026-10-01T10:00:00+03:00"}
+  ]
+}
