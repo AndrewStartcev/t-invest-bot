@@ -95,6 +95,25 @@ class PulseBrowser:
             self.request_headers = {key: value for key, value in headers.items()
                                     if key.lower() in {"x-app-name", "x-app-version", "x-platform", "referer"}}
 
+    def recover_page(self) -> bool:
+        if not self.context:
+            return False
+        pages = [page for page in self.context.pages if not page.is_closed()]
+        if not pages:
+            return False
+        self.page = next((page for page in reversed(pages) if "/operations/" in page.url.split("?")[0]), pages[-1])
+        return True
+
+    def visible_trades_page(self, profile_url: str) -> bool:
+        _, url = operations_url(profile_url)
+        if not self.recover_page() or self.page.url.split("?")[0] != url:
+            return False
+        try:
+            text = self.page.locator("body").inner_text(timeout=3000)
+        except Exception:
+            return False
+        return "Сделки" in text and "Создать профиль" not in text
+
     def refresh(self, profile_url: str) -> None:
         _, url = operations_url(profile_url)
         pages = [page for page in self.context.pages if not page.is_closed() and page.url.split("?")[0] == url]
@@ -109,6 +128,8 @@ class PulseBrowser:
         name, url = operations_url(profile_url)
         if self.page is None:
             self.open(profile_url)
+        elif self.page.is_closed() and not self.recover_page():
+            raise PulseError("Окно Пульса закрыто. Открой его снова")
         for page in self.context.pages:
             if not page.is_closed() and page.url.split("?")[0] == url:
                 self.page = page

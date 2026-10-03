@@ -10,7 +10,7 @@ from unittest.mock import patch
 from urllib.request import Request, urlopen
 
 import demo_admin
-from pulse_live import operations_url, with_cursor
+from pulse_live import PulseBrowser, operations_url, with_cursor
 
 
 class FakeBrowser:
@@ -30,6 +30,48 @@ class FakeBrowser:
 
 
 class LiveMonitorTests(unittest.TestCase):
+    def test_closed_login_tab_recovers_open_trades_tab(self):
+        class Page:
+            def __init__(self, url, closed=False):
+                self.url = url
+                self.closed = closed
+
+            def is_closed(self):
+                return self.closed
+
+        browser = PulseBrowser(Path("unused"))
+        login = Page("https://www.tbank.ru/auth/", closed=True)
+        trades = Page("https://www.tbank.ru/invest/pulse/profile/LinMath/operations/")
+        browser.page = login
+        browser.context = type("Context", (), {"pages": [login, trades]})()
+        self.assertTrue(browser.recover_page())
+        self.assertIs(browser.page, trades)
+
+    def test_browser_read_error_keeps_visible_login_window(self):
+        class VisibleBrowser:
+            headless = False
+            list_url = "https://example.invalid/instrument"
+
+            def recover_page(self):
+                return True
+
+            def visible_trades_page(self, profile_url):
+                return True
+
+            class page:
+                @staticmethod
+                def is_closed():
+                    return False
+
+        browser = VisibleBrowser()
+        with patch.object(demo_admin, "AUTH", {"status": "authenticated", "message": ""}), patch.object(
+            demo_admin, "MONITOR", {"status": "running", "message": ""}
+        ):
+            self.assertFalse(demo_admin.handle_poll_error(browser, TimeoutError(), "https://www.tbank.ru/invest/social/profile/LinMath/"))
+            self.assertIsNone(browser.list_url)
+            self.assertEqual(demo_admin.AUTH["status"], "authenticated")
+            self.assertIn("TimeoutError", demo_admin.MONITOR["message"])
+
     def test_auth_button_queues_one_open_without_waiting_for_browser(self):
         requests = queue.Queue()
         auth = {"status": "required", "message": "Нужен вход"}

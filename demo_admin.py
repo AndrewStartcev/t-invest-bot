@@ -221,10 +221,28 @@ def poll_once(browser: PulseBrowser, settings: dict, *, emit_events: bool = True
         add_event(event)
 
 
+def handle_poll_error(browser: PulseBrowser, error: Exception, profile_url: str) -> bool:
+    message = str(error) if isinstance(error, PulseError) else f"Ошибка браузера ({type(error).__name__})"
+    login_needed = isinstance(error, PulseError) and any(
+        marker in message for marker in ("Сделки не загрузились", "HTTP 401", "HTTP 403", "Заверши вход")
+    )
+    visible = not browser.headless and browser.visible_trades_page(profile_url)
+    with LOCK:
+        MONITOR.update(status="error", message=message)
+        if login_needed or not isinstance(error, PulseError):
+            AUTH.update(status="authenticated" if visible else "required" if browser.headless else "waiting",
+                        message="Вход подтверждён, но список сделок пока недоступен" if visible else message)
+    should_close = (not browser.recover_page()) or (browser.headless and (login_needed or not isinstance(error, PulseError)))
+    if not should_close and (login_needed or not isinstance(error, PulseError)):
+        browser.list_url = None
+    return should_close
+
+
 def monitor_loop() -> None:
     browser = None
     last_profile = None
     next_poll = 0.0
+    next_ui_probe = 0.0
     while True:
         settings = load_settings()
         if last_profile != settings["profile_url"]:
@@ -246,6 +264,8 @@ def monitor_loop() -> None:
         if request:
             try:
                 if request["action"] in {"auth_start", "show"}:
+                    if browser and browser.page.is_closed():
+                        browser.recover_page()
                     if browser is None or browser.headless or browser.page.is_closed():
                         if browser:
                             browser.close()
@@ -287,15 +307,28 @@ def monitor_loop() -> None:
 
         if browser and AUTH["status"] in {"waiting", "required"} and not browser.list_url:
             try:
+                if browser.page.is_closed() and not browser.recover_page():
+                    raise PulseError("Окно Пульса закрыто")
                 browser.page.wait_for_timeout(250)
+                if time.monotonic() >= next_ui_probe and browser.visible_trades_page(settings["profile_url"]):
+                    with LOCK:
+                        AUTH.update(status="authenticated", message="Вход в Пульс подтверждён")
+                        MONITOR.update(status="checking", message="Вход подтверждён, загружаем список сделок")
+                    next_poll = 0
+                next_ui_probe = time.monotonic() + 3
             except Exception as error:
-                with LOCK:
-                    AUTH.update(status="required", message=f"Окно Пульса закрыто ({type(error).__name__})")
-                try:
-                    browser.close()
-                except Exception:
-                    pass
-                browser = None
+                if not browser.recover_page():
+                    with LOCK:
+                        AUTH.update(status="required", message=f"Окно Пульса закрыто ({type(error).__name__})")
+                    try:
+                        browser.close()
+                    except Exception:
+                        pass
+                    browser = None
+            continue
+
+        if browser and AUTH["status"] == "authenticated" and not browser.list_url and MONITOR["status"] == "error":
+            browser.page.wait_for_timeout(250)
             continue
 
         if browser and time.monotonic() >= next_poll:
@@ -305,16 +338,7 @@ def monitor_loop() -> None:
                     with LOCK:
                         MONITOR.update(status="stopped", message="Живые уведомления выключены; анализ профиля обновлён")
             except Exception as error:
-                message = str(error) if isinstance(error, PulseError) else f"Ошибка браузера ({type(error).__name__})"
-                login_needed = isinstance(error, PulseError) and any(marker in message for marker in ("Сделки не загрузились", "HTTP 401", "HTTP 403", "Заверши вход"))
-                with LOCK:
-                    MONITOR.update(status="error", message=message)
-                    if login_needed or AUTH["status"] in {"checking", "waiting"}:
-                        AUTH.update(status="waiting" if not browser.headless else "required", message=message)
-                if not isinstance(error, PulseError):
-                    with LOCK:
-                        AUTH.update(status="checking", message="Повторно проверяем вход в Пульс")
-                if (browser.headless and (login_needed or AUTH["status"] == "required")) or not isinstance(error, PulseError):
+                if handle_poll_error(browser, error, settings["profile_url"]):
                     try:
                         browser.close()
                     except Exception:
@@ -420,7 +444,10 @@ class Handler(BaseHTTPRequestHandler):
                 self.respond(202, {"ok": True})
             elif self.path == "/api/auth/check":
                 with LOCK:
-                    if AUTH["status"] != "checking":
+                    if AUTH["status"] == "authenticated":
+                        MONITOR.update(status="checking", message="Обновляем данные Пульса…")
+                        HISTORY_REQUESTS.put({"action": "auth_check"})
+                    elif AUTH["status"] != "checking":
                         AUTH.update(status="checking", message="Проверяем сделки Пульса…")
                         HISTORY_REQUESTS.put({"action": "auth_check"})
                 self.respond(202, {"ok": True})

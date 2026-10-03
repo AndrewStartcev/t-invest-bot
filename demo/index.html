@@ -176,6 +176,7 @@
                 <div class="source-line"><span>Последняя проверка</span><b id="last-check">—</b></div>
                 <div class="source-line"><span>Telegram</span><b id="telegram-summary">—</b></div>
                 <p class="muted space-top" id="source-message">Подключаемся к Пульсу…</p>
+                <button class="button neutral small space-top" id="refresh-source" type="button">Проверить данные</button>
               </div></section>
               <section class="panel"><div class="panel-head"><h2>Наш результат</h2><span class="tag">Только демо</span></div><div class="panel-body"><p class="subtle">Покупки, отмеченные ниже, созданы для проверки сценария. Денежные средства и позиции брокерского счёта не подключены.</p><div class="source-line space-top"><span>Тестовых операций</span><b id="demo-total">0</b></div><div class="source-line"><span>Уведомления</span><b id="notification-status">—</b></div></div></section>
             </div>
@@ -263,6 +264,12 @@
     el('auth-button').addEventListener('click', startAuth);
     el('auth-show').addEventListener('click', () => api('/api/auth/start', {}).catch(error => el('auth-message').textContent = error.message));
     el('open-pulse').addEventListener('click', () => api('/api/auth/start', {}).catch(error => el('settings-message').textContent = error.message));
+    el('refresh-source').addEventListener('click', async () => {
+      const button = el('refresh-source'); button.disabled = true;
+      try { await api('/api/auth/check', {}); el('source-message').textContent = 'Обновляем данные Пульса…'; }
+      catch (error) { el('source-message').textContent = error.message; }
+      finally { setTimeout(() => button.disabled = false, 3000); }
+    });
     function renderChart() {
       const svg = el('activity-chart'); svg.replaceChildren();
       const now = new Date(), start = now.getTime() - 24*3600*1000;
