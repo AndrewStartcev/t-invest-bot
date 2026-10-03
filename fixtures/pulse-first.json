@@ -1,6 +1,13 @@
 {
   "profile": "demo-author",
-  "trades": [
-    {"id": "example-001", "instrument": "DEMO", "side": "BUY", "time": "2026-10-01T10:00:00+03:00"}
+  "instruments": [
+    {
+      "ticker": "DEMO",
+      "classCode": "TQBR",
+      "totalOperationsCount": 12,
+      "history": [
+        {"tradeDateTime": "2026-10-01T10:00:00+03:00", "action": "buy", "currency": "rub", "averagePrice": 100}
+      ]
+    }
   ]
 }

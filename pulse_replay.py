@@ -1,4 +1,4 @@
-"""Replay normalized Pulse snapshots. No network or brokerage operations."""
+"""Replay sanitized Pulse snapshots by instrument trade counts. No network or orders."""
 
 from __future__ import annotations
 
@@ -10,28 +10,34 @@ import tempfile
 from pathlib import Path
 
 
-REQUIRED = {"id", "instrument", "side", "time"}
-
-
 def read_snapshot(path: Path) -> tuple[str, list[dict]]:
     data = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(data, dict) or not isinstance(data.get("profile"), str) or not data["profile"]:
         raise ValueError("snapshot.profile must be a nonempty string")
-    trades = data.get("trades")
-    if not isinstance(trades, list):
-        raise ValueError("snapshot.trades must be a list")
-    seen = set()
-    for trade in trades:
-        if not isinstance(trade, dict) or not REQUIRED.issubset(trade):
-            raise ValueError("each trade needs id, instrument, side and time")
-        if not all(isinstance(trade[key], str) and trade[key] for key in REQUIRED):
-            raise ValueError("required trade fields must be nonempty strings")
-        if trade["side"] not in {"BUY", "SELL"}:
-            raise ValueError("trade.side must be BUY or SELL")
-        if trade["id"] in seen:
-            raise ValueError("duplicate trade id in one snapshot")
-        seen.add(trade["id"])
-    return data["profile"], trades
+    instruments = data.get("instruments")
+    if not isinstance(instruments, list):
+        raise ValueError("snapshot.instruments must be a list")
+    keys = set()
+    for item in instruments:
+        if not isinstance(item, dict):
+            raise ValueError("instrument must be an object")
+        ticker, class_code = item.get("ticker"), item.get("classCode")
+        count, history = item.get("totalOperationsCount"), item.get("history")
+        if not all(isinstance(value, str) and value for value in (ticker, class_code)):
+            raise ValueError("instrument needs ticker and classCode")
+        if type(count) is not int or count < 0 or not isinstance(history, list):
+            raise ValueError("instrument needs nonnegative totalOperationsCount and history list")
+        key = f"{ticker}:{class_code}"
+        if key in keys:
+            raise ValueError(f"duplicate instrument {key}")
+        keys.add(key)
+        for trade in history:
+            if not isinstance(trade, dict) or not all(
+                isinstance(trade.get(field), str) and trade[field]
+                for field in ("tradeDateTime", "action", "currency")
+            ) or trade["action"] not in ("buy", "sell") or not isinstance(trade.get("averagePrice"), (int, float)):
+                raise ValueError(f"invalid history item for {key}")
+    return data["profile"], instruments
 
 
 def write_state(path: Path, state: dict) -> None:
@@ -49,19 +55,43 @@ def write_state(path: Path, state: dict) -> None:
 
 
 def replay(state_path: Path, snapshot_path: Path) -> list[dict]:
-    profile, trades = read_snapshot(snapshot_path)
+    profile, instruments = read_snapshot(snapshot_path)
     state = json.loads(state_path.read_text(encoding="utf-8")) if state_path.exists() else {}
     if not isinstance(state, dict):
         raise ValueError("state must be an object")
-    baseline = profile not in state
-    known = state.setdefault(profile, [])
-    if not isinstance(known, list) or not all(isinstance(item, str) for item in known):
-        raise ValueError("invalid state for profile")
-    known_set = set(known)
-    fresh = [] if baseline else [trade for trade in trades if trade["id"] not in known_set]
-    known.extend(trade["id"] for trade in trades if trade["id"] not in known_set)
+    profile_state = state.setdefault(profile, {})
+    if not isinstance(profile_state, dict):
+        raise ValueError("invalid profile state")
+    fresh = []
+    updates = {}
+    for item in instruments:
+        ticker, class_code = item["ticker"], item["classCode"]
+        key = f"{ticker}:{class_code}"
+        count = item["totalOperationsCount"]
+        previous = profile_state.get(key)
+        if previous is not None and (type(previous) is not int or previous < 0):
+            raise ValueError(f"invalid state count for {key}")
+        if previous is not None:
+            delta = count - previous
+            if delta < 0:
+                raise ValueError(f"count decreased for {key}; manual review needed")
+            if delta > len(item["history"]):
+                raise ValueError(f"history incomplete for {key}: need {delta}, got {len(item['history'])}")
+            for offset, trade in enumerate(reversed(item["history"][:delta]), start=1):
+                fresh.append({
+                    "profile": profile,
+                    "ticker": ticker,
+                    "classCode": class_code,
+                    "sequence": previous + offset,
+                    "tradeDateTime": trade["tradeDateTime"],
+                    "action": trade["action"],
+                    "currency": trade["currency"],
+                    "averagePrice": trade["averagePrice"],
+                })
+        updates[key] = count
+    profile_state.update(updates)
     write_state(state_path, state)
-    return fresh
+    return sorted(fresh, key=lambda trade: (trade["tradeDateTime"], trade["ticker"], trade["sequence"]))
 
 
 def main() -> int:

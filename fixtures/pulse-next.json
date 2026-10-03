@@ -1,7 +1,15 @@
 {
   "profile": "demo-author",
-  "trades": [
-    {"id": "example-001", "instrument": "DEMO", "side": "BUY", "time": "2026-10-01T10:00:00+03:00"},
-    {"id": "example-002", "instrument": "DEMO", "side": "SELL", "time": "2026-10-02T11:30:00+03:00"}
+  "instruments": [
+    {
+      "ticker": "DEMO",
+      "classCode": "TQBR",
+      "totalOperationsCount": 14,
+      "history": [
+        {"tradeDateTime": "2026-10-02T11:30:00+03:00", "action": "sell", "currency": "rub", "averagePrice": 101},
+        {"tradeDateTime": "2026-10-02T11:30:00+03:00", "action": "sell", "currency": "rub", "averagePrice": 101},
+        {"tradeDateTime": "2026-10-01T10:00:00+03:00", "action": "buy", "currency": "rub", "averagePrice": 100}
+      ]
+    }
   ]
 }
