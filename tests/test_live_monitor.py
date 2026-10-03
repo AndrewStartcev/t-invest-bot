@@ -11,7 +11,7 @@ from urllib.request import Request, urlopen
 from urllib.error import HTTPError
 
 import demo_admin
-from pulse_live import PulseBrowser, operations_url, with_cursor
+from pulse_live import PulseBrowser, PulseError, operations_url, with_cursor
 
 
 class FakeBrowser:
@@ -31,6 +31,25 @@ class FakeBrowser:
 
 
 class LiveMonitorTests(unittest.TestCase):
+    def test_saving_settings_keeps_authenticated_admin(self):
+        auth = {"status": "authenticated", "message": "Вход подтверждён"}
+        with tempfile.TemporaryDirectory() as folder, patch.object(demo_admin, "AUTH", auth), \
+                patch.object(demo_admin, "SETTINGS_PATH", Path(folder) / "settings.json"):
+            server = ThreadingHTTPServer(("127.0.0.1", 0), demo_admin.Handler)
+            worker = threading.Thread(target=server.serve_forever, daemon=True)
+            worker.start()
+            try:
+                settings = {**demo_admin.DEFAULTS, "profile_url": demo_admin.DEFAULTS["profile_url"] + ""}
+                request = Request(f"http://127.0.0.1:{server.server_port}/api/settings",
+                                  data=json.dumps(settings).encode(), headers={"Content-Type": "application/json"})
+                with urlopen(request, timeout=2) as response:
+                    self.assertEqual(json.load(response)["settings"], settings)
+                self.assertEqual(auth["status"], "authenticated")
+            finally:
+                server.shutdown()
+                server.server_close()
+                worker.join(timeout=2)
+
     def test_recent_stock_buy_is_demo_only_and_cannot_repeat(self):
         trade_time = (datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat()
         candidate = {"id": "test-buy", "profile": "LinMath", "ticker": "TEST", "classCode": "TQBR",
@@ -99,6 +118,49 @@ class LiveMonitorTests(unittest.TestCase):
             self.assertIsNone(browser.list_url)
             self.assertEqual(demo_admin.AUTH["status"], "authenticated")
             self.assertIn("TimeoutError", demo_admin.MONITOR["message"])
+
+    def test_closed_headless_browser_keeps_saved_login_and_retries(self):
+        class ClosedBrowser:
+            headless = True
+            list_url = "https://example.invalid/instrument"
+
+            def recover_page(self):
+                raise RuntimeError("browser context closed")
+
+        auth = {"status": "authenticated", "message": "Вход подтверждён"}
+        monitor = {"status": "running", "message": "Данные получены"}
+        with patch.object(demo_admin, "AUTH", auth), patch.object(demo_admin, "MONITOR", monitor):
+            self.assertTrue(demo_admin.handle_poll_error(
+                ClosedBrowser(), RuntimeError("TargetClosedError"), demo_admin.DEFAULTS["profile_url"]))
+        self.assertEqual(auth["status"], "authenticated")
+        self.assertIn("сохранённой сессии", auth["message"])
+        self.assertEqual(monitor["status"], "error")
+
+    def test_expired_login_requires_authorization(self):
+        class ClosedBrowser:
+            headless = True
+            list_url = None
+
+            def recover_page(self):
+                return False
+
+        auth = {"status": "authenticated", "message": "Вход подтверждён"}
+        with patch.object(demo_admin, "AUTH", auth), patch.object(demo_admin, "MONITOR", {}):
+            self.assertTrue(demo_admin.handle_poll_error(
+                ClosedBrowser(), PulseError("Пульс вернул HTTP 401"), demo_admin.DEFAULTS["profile_url"]))
+        self.assertEqual(auth["status"], "required")
+
+    def test_session_cookies_are_saved_locally_without_other_domains(self):
+        with tempfile.TemporaryDirectory() as folder:
+            browser = PulseBrowser(Path(folder), headless=True)
+            browser.context = type("Context", (), {"cookies": lambda self: [
+                {"name": "session", "value": "saved", "domain": ".tbank.ru", "path": "/", "expires": -1},
+                {"name": "other", "value": "discard", "domain": ".example.com", "path": "/", "expires": -1},
+                {"name": "lookalike", "value": "discard", "domain": ".nottbank.ru", "path": "/", "expires": -1},
+            ]})()
+            browser.save_session()
+            saved = json.loads((Path(folder) / "pulse-session.json").read_text(encoding="utf-8"))
+            self.assertEqual([cookie["name"] for cookie in saved["cookies"]], ["session"])
 
     def test_auth_button_queues_one_open_without_waiting_for_browser(self):
         requests = queue.Queue()

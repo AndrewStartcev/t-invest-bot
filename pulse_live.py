@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import time
@@ -11,6 +12,11 @@ from urllib.parse import parse_qsl, quote, unquote, urlencode, urlparse, urlunpa
 
 class PulseError(Exception):
     pass
+
+
+def is_tbank_cookie(cookie: dict) -> bool:
+    domain = str(cookie.get("domain", "")).lstrip(".").lower()
+    return domain == "tbank.ru" or domain.endswith(".tbank.ru")
 
 
 def browser_executable() -> str | None:
@@ -88,12 +94,32 @@ class PulseBrowser:
                 str(self.profile_dir), executable_path=executable, headless=self.headless,
                 viewport={"width": 1280, "height": 900},
             )
+            session_path = self.profile_dir / "pulse-session.json"
+            if session_path.exists():
+                try:
+                    saved = json.loads(session_path.read_text(encoding="utf-8"))
+                    cookies = [cookie for cookie in saved.get("cookies", [])
+                               if isinstance(cookie, dict) and is_tbank_cookie(cookie)]
+                    if cookies:
+                        self.context.add_cookies(cookies)
+                except Exception:
+                    pass
             self.context.on("response", self._observe_response)
             self.page = self.context.pages[0] if self.context.pages else self.context.new_page()
             self.page.goto(url, wait_until="commit", timeout=45000)
         except Exception:
             self.close()
             raise
+
+    def save_session(self) -> None:
+        """Keep session cookies in the ignored local profile for the next browser run."""
+        cookies = [cookie for cookie in self.context.cookies() if is_tbank_cookie(cookie)]
+        if not cookies:
+            return
+        session_path = self.profile_dir / "pulse-session.json"
+        temporary = session_path.with_suffix(".tmp")
+        temporary.write_text(json.dumps({"cookies": cookies}), encoding="utf-8")
+        os.replace(temporary, session_path)
 
     def _observe_response(self, response) -> None:
         path = urlparse(response.url).path
