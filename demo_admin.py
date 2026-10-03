@@ -310,12 +310,15 @@ def monitor_loop() -> None:
                 if browser.page.is_closed() and not browser.recover_page():
                     raise PulseError("Окно Пульса закрыто")
                 browser.page.wait_for_timeout(250)
-                if time.monotonic() >= next_ui_probe and browser.visible_trades_page(settings["profile_url"]):
-                    with LOCK:
-                        AUTH.update(status="authenticated", message="Вход в Пульс подтверждён")
-                        MONITOR.update(status="checking", message="Вход подтверждён, загружаем список сделок")
-                    next_poll = 0
-                next_ui_probe = time.monotonic() + 3
+                if time.monotonic() >= next_ui_probe:
+                    if browser.nickname_url and browser.instrument_urls:
+                        browser.resolve_target()
+                    if not browser.list_url and browser.visible_trades_page(settings["profile_url"]):
+                        with LOCK:
+                            AUTH.update(status="authenticated", message="Вход в Пульс подтверждён")
+                            MONITOR.update(status="checking", message="Вход подтверждён, загружаем список сделок")
+                        next_poll = 0
+                    next_ui_probe = time.monotonic() + 3
             except Exception as error:
                 if not browser.recover_page():
                     with LOCK:

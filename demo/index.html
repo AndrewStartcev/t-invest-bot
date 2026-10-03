@@ -167,7 +167,7 @@
           <div class="overview-grid">
             <div class="stack">
               <section class="panel"><div class="panel-head"><h2>Сделки автора за 24 часа</h2><span class="tag" id="today-count">0 сделок</span></div><div id="today-list" class="empty">Сделки пока не загружены</div></section>
-              <section class="panel"><div class="panel-head"><h2>Инструменты профиля</h2><span class="tag" id="instrument-count">0 инструментов</span></div><div class="panel-body"><input class="search" id="instrument-search" type="search" placeholder="Поиск по тикеру или названию" aria-label="Поиск инструмента"></div><div id="instrument-list" class="empty">Данные появятся после входа</div><div id="history-panel" hidden><div class="panel-head"><h2 id="history-title">История</h2><button type="button" class="link" id="history-close">Закрыть</button></div><div id="history-list" class="empty"></div><div class="panel-body"><button class="button neutral small" type="button" id="history-more" hidden>Показать ещё</button></div></div></section>
+              <section class="panel"><div class="panel-head"><h2>Инструменты профиля</h2><span class="tag" id="instrument-count">0 инструментов</span></div><div class="panel-body"><input class="search" id="instrument-search" type="search" placeholder="Поиск по тикеру или названию" aria-label="Поиск инструмента"></div><div id="instrument-list" class="empty">Данные появятся после входа</div><div class="panel-body"><button class="button neutral small" type="button" id="instrument-more" hidden>Показать ещё</button></div><div id="history-panel" hidden><div class="panel-head"><h2 id="history-title">История</h2><button type="button" class="link" id="history-close">Закрыть</button></div><div id="history-list" class="empty"></div><div class="panel-body"><button class="button neutral small" type="button" id="history-more" hidden>Показать ещё</button></div></div></section>
             </div>
             <div class="stack">
               <section class="panel"><div class="panel-head"><h2>Источник</h2><span class="tag">Пульс</span></div><div class="panel-body">
@@ -209,7 +209,7 @@
   </div>
   <script>
     const el = id => document.getElementById(id);
-    let liveMode = false, instruments = [], today = [], events = [], selected = null, historyCursor = null, tokenConfigured = false, authStatus = 'checking';
+    let liveMode = false, instruments = [], today = [], events = [], selected = null, historyCursor = null, tokenConfigured = false, authStatus = 'checking', instrumentLimit = 60;
     const tabs = [...document.querySelectorAll('[data-view]')];
     const pages = [...document.querySelectorAll('.view')];
     const names = {overview:'Обзор',settings:'Настройки',journal:'Журнал'};
@@ -310,12 +310,14 @@
       const box=el('instrument-list');box.replaceChildren();el('instrument-count').textContent=instruments.length+' инструментов';
       const query=el('instrument-search').value.trim().toLocaleLowerCase('ru');
       const found=instruments.filter(item=>(item.ticker+' '+item.showName).toLocaleLowerCase('ru').includes(query));
+      el('instrument-more').hidden=found.length<=instrumentLimit;
       if(!found.length){box.className='empty';box.textContent=instruments.length?'Ничего не найдено':'Список инструментов пуст';return;}
       box.className='table-wrap';const table=document.createElement('table'),head=document.createElement('thead');
       head.innerHTML='<tr><th>Инструмент</th><th>Сделок</th><th>Последняя сделка</th></tr>';table.append(head);const body=document.createElement('tbody');
-      for(const item of found){const row=document.createElement('tr'),name=document.createElement('td'),button=document.createElement('button');button.type='button';button.className='link';button.textContent=item.showName+' · '+item.ticker;button.addEventListener('click',()=>openHistory(item));name.append(button);row.append(name);for(const value of [item.totalOperationsCount,item.maxTradeDateTime?fmtDate(item.maxTradeDateTime):'—']){const cell=document.createElement('td');cell.textContent=value;row.append(cell);}body.append(row);}
+      for(const item of found.slice(0,instrumentLimit)){const row=document.createElement('tr'),name=document.createElement('td'),button=document.createElement('button');button.type='button';button.className='link';button.textContent=item.showName+' · '+item.ticker;button.addEventListener('click',()=>openHistory(item));name.append(button);row.append(name);for(const value of [item.totalOperationsCount,item.maxTradeDateTime?fmtDate(item.maxTradeDateTime):'—']){const cell=document.createElement('td');cell.textContent=value;row.append(cell);}body.append(row);}
       table.append(body);box.append(table);
     }
+    el('instrument-more').addEventListener('click',()=>{instrumentLimit+=60;renderInstruments();});
     async function openHistory(item,more=false){
       if(!more){selected=item;historyCursor=null;el('history-list').replaceChildren();}
       el('history-panel').hidden=false;el('history-title').textContent='История · '+selected.showName;el('history-more').hidden=true;
@@ -330,7 +332,7 @@
     }
     el('history-close').addEventListener('click',()=>el('history-panel').hidden=true);
     el('history-more').addEventListener('click',()=>selected&&openHistory(selected,true));
-    el('instrument-search').addEventListener('input',renderInstruments);
+    el('instrument-search').addEventListener('input',()=>{instrumentLimit=60;renderInstruments();});
     function renderEvents(){
       const box=el('events');box.replaceChildren();el('event-count').textContent=events.length+' событий';
       if(!events.length){box.className='empty';box.textContent='Событий пока нет';return;}box.className='table-wrap';

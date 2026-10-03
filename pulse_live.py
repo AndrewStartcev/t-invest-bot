@@ -6,7 +6,7 @@ import os
 import re
 import time
 from pathlib import Path
-from urllib.parse import parse_qsl, quote, urlencode, urlparse, urlunparse
+from urllib.parse import parse_qsl, quote, unquote, urlencode, urlparse, urlunparse
 
 
 class PulseError(Exception):
@@ -41,10 +41,16 @@ def with_cursor(url: str, cursor: str | int) -> str:
     return urlunparse(parsed._replace(query=urlencode(query)))
 
 
+def without_cursor(url: str) -> str:
+    parsed = urlparse(url)
+    query = [(key, value) for key, value in parse_qsl(parsed.query, keep_blank_values=True) if key != "nextCursor"]
+    return urlunparse(parsed._replace(query=urlencode(query)))
+
+
 def payload(response) -> dict:
-    if not response.ok:
-        raise PulseError(f"Пульс вернул HTTP {response.status}; проверь вход в браузере")
-    data = response.json()
+    if not response["ok"]:
+        raise PulseError(f"Пульс вернул HTTP {response['status']}; проверь вход в браузере")
+    data = response["data"]
     result = data.get("payload") if isinstance(data, dict) else None
     if not isinstance(result, dict) or not isinstance(result.get("items"), list):
         raise PulseError("Пульс изменил формат ответа или требуется повторный вход")
@@ -59,6 +65,10 @@ class PulseBrowser:
         self.context = None
         self.page = None
         self.list_url = None
+        self.nickname_url = None
+        self.instrument_urls = {}
+        self.target_profile_id = None
+        self.profile_name = None
         self.request_headers = {}
         self.observed_api = set()
 
@@ -70,7 +80,7 @@ class PulseBrowser:
         executable = browser_executable()
         if not executable:
             raise PulseError("Brave, Edge или Chrome не найден. Задай PULSE_BROWSER_PATH")
-        _, url = operations_url(profile_url)
+        self.profile_name, url = operations_url(profile_url)
         self.profile_dir.mkdir(parents=True, exist_ok=True)
         self.playwright = sync_playwright().start()
         try:
@@ -89,8 +99,14 @@ class PulseBrowser:
         path = urlparse(response.url).path
         if "/social-api-gateway/" in path:
             self.observed_api.add((tuple(path.rsplit("/", 2)[-2:]), response.status))
+        if (re.fullmatch(r"/mybank/api/social-api-gateway/social/v1/profile/nickname/[^/]+", path)
+                and unquote(path.rsplit("/", 1)[-1]).casefold() == self.profile_name.casefold()):
+            self.nickname_url = response.url
         if re.fullmatch(r"/mybank/api/social-api-gateway/social/v1/profile/[^/]+/instrument", path):
-            self.list_url = response.url
+            profile_id = path.rsplit("/", 2)[-2]
+            self.instrument_urls[profile_id] = without_cursor(response.url)
+            if profile_id == self.target_profile_id:
+                self.list_url = self.instrument_urls[profile_id]
             headers = response.request.headers
             self.request_headers = {key: value for key, value in headers.items()
                                     if key.lower() in {"x-app-name", "x-app-version", "x-platform", "referer"}}
@@ -113,6 +129,29 @@ class PulseBrowser:
         except Exception:
             return False
         return "Сделки" in text and "Создать профиль" not in text
+
+    def _fetch(self, url: str) -> dict:
+        if self.page.is_closed() and not self.recover_page():
+            raise PulseError("Окно Пульса закрыто")
+        headers = {key: value for key, value in self.request_headers.items() if key.lower() != "referer"}
+        return self.page.evaluate("""async ({url, headers}) => {
+            const response = await fetch(url, {credentials: 'include', headers});
+            let data = null;
+            try { data = await response.json(); } catch (_) {}
+            return {ok: response.ok, status: response.status, data};
+        }""", {"url": url, "headers": headers})
+
+    def resolve_target(self) -> bool:
+        if self.target_profile_id is None:
+            if not self.nickname_url:
+                return False
+            nickname_response = self._fetch(self.nickname_url)
+            target = (nickname_response.get("data") or {}).get("payload") or {}
+            if not nickname_response["ok"] or not isinstance(target, dict) or not isinstance(target.get("id"), str):
+                raise PulseError("Пульс не вернул профиль автора")
+            self.target_profile_id = target["id"]
+        self.list_url = self.instrument_urls.get(self.target_profile_id)
+        return self.list_url is not None
 
     def refresh(self, profile_url: str) -> None:
         _, url = operations_url(profile_url)
@@ -137,19 +176,24 @@ class PulseBrowser:
         if self.page.url.split("?")[0] != url:
             raise PulseError("Заверши вход в Т-Банк и вернись на страницу «Сделки» в окне мониторинга")
         deadline = time.monotonic() + 15
-        while not self.list_url and time.monotonic() < deadline:
+        while (not self.nickname_url or not self.instrument_urls) and time.monotonic() < deadline:
             if self.page.is_closed():
                 raise PulseError("Окно Пульса закрыто. Выключи и снова включи мониторинг")
             self.page.wait_for_timeout(250)
+        if self.nickname_url:
+            self.resolve_target()
+        while not self.list_url and time.monotonic() < deadline:
+            self.page.wait_for_timeout(250)
+            self.resolve_target()
         if not self.list_url:
             seen = len(self.observed_api)
             raise PulseError(f"Сделки не загрузились (ответов API Пульса: {seen}). Открой раздел «Сделки» в окне Пульса")
         items = []
         seen = set()
         cursor = None
+        list_url = self.list_url
         for _ in range(100):
-            response = self.context.request.get(with_cursor(self.list_url, cursor) if cursor else self.list_url,
-                                                headers=self.request_headers, timeout=20000)
+            response = self._fetch(with_cursor(list_url, cursor) if cursor is not None else list_url)
             page = payload(response)
             items.extend(page["items"])
             cursor = page.get("nextCursor")
@@ -163,8 +207,8 @@ class PulseBrowser:
         if not items:
             raise PulseError("Список инструментов пуст или закрыт настройками профиля")
         instruments = []
-        list_path = urlparse(self.list_url).path
-        base = self.list_url.replace(list_path, list_path.rsplit("/instrument", 1)[0] + "/operation/instrument/{ticker}/{classCode}", 1)
+        list_path = urlparse(list_url).path
+        base = list_url.replace(list_path, list_path.rsplit("/instrument", 1)[0] + "/operation/instrument/{ticker}/{classCode}", 1)
         for item in items:
             ticker, class_code = item.get("ticker"), item.get("classCode")
             stats = item.get("statistics") or {}
@@ -180,8 +224,7 @@ class PulseBrowser:
                 next_cursor = None
                 visited = set()
                 while len(history) < needed:
-                    page = payload(self.context.request.get(with_cursor(history_url, next_cursor) if next_cursor else history_url,
-                                                            headers=self.request_headers, timeout=20000))
+                    page = payload(self._fetch(with_cursor(history_url, next_cursor) if next_cursor else history_url))
                     history.extend(page["items"])
                     if len(history) >= needed:
                         break
@@ -202,8 +245,7 @@ class PulseBrowser:
         parsed = urlparse(self.list_url)
         path = parsed.path.rsplit("/instrument", 1)[0] + f"/operation/instrument/{quote(ticker)}/{quote(class_code)}"
         url = urlunparse(parsed._replace(path=path))
-        data = payload(self.context.request.get(with_cursor(url, cursor) if cursor is not None else url,
-                                                headers=self.request_headers, timeout=20000))
+        data = payload(self._fetch(with_cursor(url, cursor) if cursor is not None else url))
         return {"items": [{key: item.get(key) for key in ("tradeDateTime", "action", "currency", "averagePrice")}
                           for item in data["items"]], "hasNext": bool(data.get("hasNext")), "nextCursor": data.get("nextCursor")}
 
