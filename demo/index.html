@@ -104,10 +104,12 @@
     .demo-box small { color:#8a9aaf; font-size:11px; }
     .demo-actions { display:flex; gap:9px; }
     .demo-actions button { flex:1; }
-    .auth { position:fixed; inset:0; z-index:10; background:#f2f5f9; display:grid; place-items:center; padding:22px; }
+    .auth { position:fixed; inset:0; z-index:10; background:#14223999; backdrop-filter:blur(3px); display:grid; place-items:center; padding:22px; }
     .auth-card { width:min(100%,490px); background:#fff; border:1px solid #e0e7f0; border-radius:16px; box-shadow:0 26px 70px #1422391a; overflow:hidden; }
-    .auth-top { background:#142239; padding:28px 34px; color:#fff; }
+    .auth-top { background:#142239; padding:22px 26px; color:#fff; display:flex; align-items:center; justify-content:space-between; }
     .auth-top .brand { padding:0; }
+    .auth-close { border:0; border-radius:6px; width:30px; height:30px; background:#ffffff1b; color:#fff; font-size:20px; line-height:1; }
+    .auth-close:hover { background:#ffffff30; }
     .auth-body { padding:33px 34px 36px; }
     .auth-body .eyebrow { color:#bd8b30; font-weight:800; font-size:11px; letter-spacing:.12em; text-transform:uppercase; }
     .auth-body h1 { margin:12px 0 12px; font-size:28px; }
@@ -128,13 +130,13 @@
   </style>
 </head>
 <body>
-  <div class="auth" id="auth-screen">
+  <div class="auth" id="auth-screen" role="dialog" aria-modal="true" aria-labelledby="auth-title">
     <div class="auth-card">
-      <div class="auth-top"><div class="brand"><span class="brand-mark">T</span><span>T-Invest Bot</span></div></div>
+      <div class="auth-top"><div class="brand"><span class="brand-mark">T</span><span>T-Invest Bot</span></div><button class="auth-close" type="button" id="auth-dismiss" aria-label="Закрыть окно подключения">×</button></div>
       <div class="auth-body">
         <span class="eyebrow">Доступ к данным</span>
-        <h1>Авторизуйся в Пульсе для работы</h1>
-        <p>Откроется отдельное окно Т-Банка. Войди в аккаунт и открой сделки. Если админка не появилась, нажми «Проверить вход». Окно Пульса нужно оставить открытым для мониторинга.</p>
+        <h1 id="auth-title">Подключить Пульс</h1>
+        <p>В отдельном окне Т-Банка войди в аккаунт. Затем нажми «Проверить вход»: панель сама откроет сделки выбранного профиля в этом же окне.</p>
         <button class="button wide" type="button" id="auth-button">Открыть окно Пульса</button>
         <button class="button neutral wide" type="button" id="auth-show" hidden>Показать окно Пульса</button>
         <div class="auth-status"><span class="dot" id="auth-dot"></span><span id="auth-message">Проверяем сохранённый вход…</span></div>
@@ -153,7 +155,7 @@
       <div class="side-foot"><b>Локальная панель</b>Данные сеанса остаются на этом компьютере</div>
     </aside>
     <main class="main">
-      <div class="topbar"><span class="breadcrumb">Пульс / <b id="breadcrumb">Обзор</b></span><div class="top-right"><span>Брокерские заявки отключены</span><span class="badge">ДЕМО ИСПОЛНЕНИЕ</span></div></div>
+      <div class="topbar"><span class="breadcrumb">Пульс / <b id="breadcrumb">Обзор</b></span><div class="top-right"><button class="button neutral small" type="button" id="connect-pulse">Подключить Пульс</button><span>Брокерские заявки отключены</span><span class="badge">ДЕМО ИСПОЛНЕНИЕ</span></div></div>
       <div class="content">
         <section class="view active" id="view-overview">
           <div class="page-head"><div><h1>Обзор</h1><p class="subtle" id="profile-heading">Профиль Пульса</p></div><div class="live-status"><i class="dot" id="source-dot"></i><span id="source-status">Подключение</span></div></div>
@@ -209,7 +211,7 @@
   </div>
   <script>
     const el = id => document.getElementById(id);
-    let liveMode = false, instruments = [], today = [], events = [], selected = null, historyCursor = null, tokenConfigured = false, authStatus = 'checking', instrumentLimit = 60;
+    let liveMode = false, instruments = [], today = [], events = [], selected = null, historyCursor = null, tokenConfigured = false, authStatus = 'checking', authDismissed = false, instrumentLimit = 60;
     const tabs = [...document.querySelectorAll('[data-view]')];
     const pages = [...document.querySelectorAll('.view')];
     const names = {overview:'Обзор',settings:'Настройки',journal:'Журнал'};
@@ -237,16 +239,22 @@
     function renderAuth(auth) {
       authStatus = auth.status;
       const ready = auth.status === 'authenticated';
-      el('auth-screen').hidden = ready;
-      el('admin-app').inert = !ready;
-      document.body.style.overflow = ready ? '' : 'hidden';
-      el('auth-summary').textContent = ready ? 'Авторизован' : auth.status === 'waiting' ? 'Ожидаем входа' : 'Нужен вход';
+      const showDialog = !ready && !authDismissed;
+      el('auth-screen').hidden = !showDialog;
+      el('admin-app').inert = showDialog;
+      document.body.style.overflow = showDialog ? 'hidden' : '';
+      el('connect-pulse').hidden = ready;
+      el('open-pulse').hidden = ready;
+      el('auth-summary').textContent = ready ? 'Авторизован' : auth.status === 'waiting' ? 'Ожидаем входа' : auth.status === 'checking' || auth.status === 'opening' ? 'Проверяем' : 'Нужен вход';
       el('auth-message').textContent = auth.message || 'Ожидаем входа';
       el('auth-dot').className = 'dot' + (ready ? ' good' : auth.status === 'required' ? ' bad' : '');
-      el('auth-button').textContent = auth.status === 'waiting' ? 'Проверить вход' : auth.status === 'opening' ? 'Открываем окно…' : 'Открыть окно Пульса';
-      el('auth-button').disabled = auth.status === 'opening';
+      el('auth-button').textContent = auth.status === 'waiting' ? 'Проверить вход' : auth.status === 'opening' ? 'Открываем окно…' : auth.status === 'checking' ? 'Проверяем сеанс…' : 'Открыть окно Пульса';
+      el('auth-button').disabled = auth.status === 'opening' || auth.status === 'checking';
       el('auth-show').hidden = auth.status !== 'waiting';
     }
+    function openConnectDialog() { authDismissed = false; renderAuth({status:authStatus,message:el('auth-message').textContent}); }
+    el('auth-dismiss').addEventListener('click', () => { authDismissed = true; renderAuth({status:authStatus,message:el('auth-message').textContent}); });
+    el('connect-pulse').addEventListener('click', openConnectDialog);
     async function startAuth() {
       el('auth-button').disabled = true;
       try {
@@ -263,10 +271,10 @@
     }
     el('auth-button').addEventListener('click', startAuth);
     el('auth-show').addEventListener('click', () => api('/api/auth/start', {}).catch(error => el('auth-message').textContent = error.message));
-    el('open-pulse').addEventListener('click', () => api('/api/auth/start', {}).catch(error => el('settings-message').textContent = error.message));
+    el('open-pulse').addEventListener('click', openConnectDialog);
     el('refresh-source').addEventListener('click', async () => {
       const button = el('refresh-source'); button.disabled = true;
-      try { await api('/api/auth/check', {}); el('source-message').textContent = 'Обновляем данные Пульса…'; }
+      try { if (authStatus !== 'authenticated' && authStatus !== 'waiting') { openConnectDialog(); return; } await api('/api/auth/check', {}); el('source-message').textContent = 'Обновляем данные Пульса…'; }
       catch (error) { el('source-message').textContent = error.message; }
       finally { setTimeout(() => button.disabled = false, 3000); }
     });
@@ -344,10 +352,10 @@
       const profile=new URL(state.settings.profile_url).pathname.split('/').filter(Boolean).at(-1);
       el('profile-heading').textContent=profile+' · профиль Пульса';el('source-profile').textContent=profile;
       el('source-mode').textContent=state.settings.monitoring_enabled?'Живой мониторинг':'Демо';
-      el('source-status').textContent=state.monitor.status==='error'?'Нужна проверка':state.settings.monitoring_enabled?'Мониторинг включён':'Мониторинг выключен';
-      el('source-dot').className='dot'+(state.monitor.status==='error'?' bad':state.monitor.status==='running'?' good':'');
+      el('source-status').textContent=state.auth.status!=='authenticated'?'Пульс не подключён':state.monitor.status==='error'?'Нужна проверка':state.settings.monitoring_enabled?'Мониторинг включён':'Мониторинг выключен';
+      el('source-dot').className='dot'+(state.auth.status!=='authenticated'||state.monitor.status==='error'?' bad':state.monitor.status==='running'?' good':'');
       el('last-check').textContent=state.monitor.last_check?fmtDate(state.monitor.last_check):'—';
-      el('source-message').textContent=state.monitor.message;el('instrument-total').textContent=instruments.length;
+      el('source-message').textContent=state.auth.status==='authenticated'?state.monitor.message:state.auth.message;el('instrument-total').textContent=instruments.length;
       const buys=today.filter(item=>item.action==='buy').length,sells=today.filter(item=>item.action==='sell').length;
       const demos=events.filter(item=>item.trade==='ДЕМО: куплено');
       el('source-buys').textContent=buys;el('source-sells').textContent=sells;el('our-buys').textContent=demos.length;el('demo-total').textContent=demos.length;

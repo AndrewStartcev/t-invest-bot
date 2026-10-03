@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 import queue
+import socket
 import threading
 import time
 from datetime import datetime, timedelta, timezone
@@ -234,18 +235,12 @@ def handle_poll_error(browser: PulseBrowser, error: Exception, profile_url: str)
     login_needed = isinstance(error, PulseError) and any(
         marker in message for marker in ("Сделки не загрузились", "HTTP 401", "HTTP 403", "Заверши вход")
     )
-    try:
-        visible = not browser.headless and browser.visible_trades_page(profile_url)
-    except Exception:
-        visible = False
     with LOCK:
         MONITOR.update(status="error", message=message)
         if login_needed:
-            AUTH.update(status="authenticated" if visible else "required" if browser.headless else "waiting",
-                        message="Вход подтверждён, но список сделок пока недоступен" if visible else message)
+            AUTH.update(status="required" if browser.headless else "waiting", message=message)
         elif not isinstance(error, PulseError) and AUTH["status"] != "authenticated":
-            AUTH.update(status="authenticated" if visible else "required" if browser.headless else "waiting",
-                        message="Вход подтверждён, но список сделок пока недоступен" if visible else message)
+            AUTH.update(status="required" if browser.headless else "waiting", message=message)
         elif AUTH["status"] == "authenticated":
             AUTH["message"] = "Восстанавливаем соединение с Пульсом из сохранённой сессии"
     try:
@@ -353,10 +348,9 @@ def monitor_loop() -> None:
                 if time.monotonic() >= next_ui_probe:
                     if browser.nickname_url and browser.instrument_urls:
                         browser.resolve_target()
-                    if not browser.list_url and browser.visible_trades_page(settings["profile_url"]):
+                    if browser.list_url:
                         with LOCK:
-                            AUTH.update(status="authenticated", message="Вход в Пульс подтверждён")
-                            MONITOR.update(status="checking", message="Вход подтверждён, загружаем список сделок")
+                            AUTH["message"] = "Сделки найдены, загружаем данные профиля"
                         next_poll = 0
                     next_ui_probe = time.monotonic() + 3
             except Exception as error:
@@ -389,6 +383,16 @@ def monitor_loop() -> None:
             next_poll = time.monotonic() + (settings["poll_seconds"] if AUTH["status"] == "authenticated" else 3)
 
 
+class LocalHTTPServer(ThreadingHTTPServer):
+    allow_reuse_address = False
+    allow_reuse_port = False
+
+    def server_bind(self) -> None:
+        if os.name == "nt":
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        super().server_bind()
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, format: str, *args: object) -> None:
         pass
@@ -415,7 +419,7 @@ class Handler(BaseHTTPRequestHandler):
             with LOCK:
                 authenticated = AUTH["status"] == "authenticated"
                 self.respond(200, {"settings": load_settings(), "token_configured": bool(telegram_token()),
-                                   "events": EVENTS if authenticated else [],
+                                   "events": EVENTS,
                                    "monitor": MONITOR if authenticated else {"status": "stopped", "message": "Ожидаем входа в Пульс", "last_check": None, "instrument_count": 0, "instruments": []},
                                    "auth": AUTH, "today": TODAY if authenticated else []})
         else:
@@ -439,7 +443,7 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError("Нужен объект JSON")
             with LOCK:
                 authenticated = AUTH["status"] == "authenticated"
-            if not authenticated and self.path not in {"/api/auth/start", "/api/browser/show", "/api/auth/check"}:
+            if not authenticated and self.path not in {"/api/auth/start", "/api/browser/show", "/api/auth/check", "/api/settings", "/api/demo"}:
                 self.respond(403, {"error": "Сначала авторизуйся в Пульсе"})
                 return
             if self.path == "/api/settings":
@@ -525,7 +529,10 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--port", type=int, default=8765)
     args = parser.parse_args()
-    server = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
+    try:
+        server = LocalHTTPServer(("127.0.0.1", args.port), Handler)
+    except OSError as error:
+        raise SystemExit(f"Админка уже запущена на порту {args.port} или порт занят") from error
     threading.Thread(target=monitor_loop, name="pulse-monitor", daemon=True).start()
     print(f"Админка: http://127.0.0.1:{server.server_port}/")
     server.serve_forever()

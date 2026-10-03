@@ -40,6 +40,14 @@ def operations_url(profile_url: str) -> tuple[str, str]:
     return name, f"https://www.tbank.ru/invest/pulse/profile/{quote(name)}/operations/"
 
 
+def is_operations_page(page_url: str, profile_url: str) -> bool:
+    name, _ = operations_url(profile_url)
+    parsed = urlparse(page_url)
+    match = re.fullmatch(r"/invest/(?:social|pulse)/profile/([^/]+)/operations/?", parsed.path)
+    return (parsed.hostname in {"tbank.ru", "www.tbank.ru"} and match is not None
+            and unquote(match.group(1)).casefold() == unquote(name).casefold())
+
+
 def with_cursor(url: str, cursor: str | int) -> str:
     parsed = urlparse(url)
     query = [(key, value) for key, value in parse_qsl(parsed.query, keep_blank_values=True) if key != "nextCursor"]
@@ -147,8 +155,7 @@ class PulseBrowser:
         return True
 
     def visible_trades_page(self, profile_url: str) -> bool:
-        _, url = operations_url(profile_url)
-        if not self.recover_page() or self.page.url.split("?")[0] != url:
+        if not self.recover_page() or not is_operations_page(self.page.url, profile_url):
             return False
         try:
             text = self.page.locator("body").inner_text(timeout=3000)
@@ -181,13 +188,14 @@ class PulseBrowser:
 
     def refresh(self, profile_url: str) -> None:
         _, url = operations_url(profile_url)
-        pages = [page for page in self.context.pages if not page.is_closed() and page.url.split("?")[0] == url]
-        if not pages:
-            raise PulseError("Открой страницу «Сделки» выбранного профиля в окне Пульса")
-        self.page = pages[-1]
+        if not self.recover_page():
+            self.page = self.context.new_page()
         self.list_url = None
+        self.nickname_url = None
+        self.instrument_urls.clear()
+        self.target_profile_id = None
         self.observed_api.clear()
-        self.page.reload(wait_until="commit", timeout=45000)
+        self.page.goto(url, wait_until="commit", timeout=45000)
 
     def snapshot(self, profile_url: str, counts: dict[str, int]) -> tuple[str, list[dict]]:
         name, url = operations_url(profile_url)
@@ -196,10 +204,10 @@ class PulseBrowser:
         elif self.page.is_closed() and not self.recover_page():
             raise PulseError("Окно Пульса закрыто. Открой его снова")
         for page in self.context.pages:
-            if not page.is_closed() and page.url.split("?")[0] == url:
+            if not page.is_closed() and is_operations_page(page.url, profile_url):
                 self.page = page
                 break
-        if self.page.url.split("?")[0] != url:
+        if not is_operations_page(self.page.url, profile_url):
             raise PulseError("Заверши вход в Т-Банк и вернись на страницу «Сделки» в окне мониторинга")
         deadline = time.monotonic() + 15
         while (not self.nickname_url or not self.instrument_urls) and time.monotonic() < deadline:

@@ -11,7 +11,7 @@ from urllib.request import Request, urlopen
 from urllib.error import HTTPError
 
 import demo_admin
-from pulse_live import PulseBrowser, PulseError, operations_url, with_cursor
+from pulse_live import PulseBrowser, PulseError, is_operations_page, operations_url, with_cursor
 
 
 class FakeBrowser:
@@ -31,6 +31,15 @@ class FakeBrowser:
 
 
 class LiveMonitorTests(unittest.TestCase):
+    def test_second_admin_cannot_bind_same_port(self):
+        first = demo_admin.LocalHTTPServer(("127.0.0.1", 0), demo_admin.Handler)
+        try:
+            with self.assertRaises(OSError):
+                second = demo_admin.LocalHTTPServer(("127.0.0.1", first.server_port), demo_admin.Handler)
+                second.server_close()
+        finally:
+            first.server_close()
+
     def test_saving_settings_keeps_authenticated_admin(self):
         auth = {"status": "authenticated", "message": "Вход подтверждён"}
         with tempfile.TemporaryDirectory() as folder, patch.object(demo_admin, "AUTH", auth), \
@@ -45,6 +54,25 @@ class LiveMonitorTests(unittest.TestCase):
                 with urlopen(request, timeout=2) as response:
                     self.assertEqual(json.load(response)["settings"], settings)
                 self.assertEqual(auth["status"], "authenticated")
+            finally:
+                server.shutdown()
+                server.server_close()
+                worker.join(timeout=2)
+
+    def test_settings_are_accessible_while_pulse_is_disconnected(self):
+        auth = {"status": "required", "message": "Требуется вход"}
+        with tempfile.TemporaryDirectory() as folder, patch.object(demo_admin, "AUTH", auth), \
+                patch.object(demo_admin, "SETTINGS_PATH", Path(folder) / "settings.json"):
+            server = ThreadingHTTPServer(("127.0.0.1", 0), demo_admin.Handler)
+            worker = threading.Thread(target=server.serve_forever, daemon=True)
+            worker.start()
+            try:
+                settings = demo_admin.DEFAULTS.copy()
+                request = Request(f"http://127.0.0.1:{server.server_port}/api/settings",
+                                  data=json.dumps(settings).encode(), headers={"Content-Type": "application/json"})
+                with urlopen(request, timeout=2) as response:
+                    self.assertEqual(json.load(response)["settings"], settings)
+                self.assertEqual(auth["status"], "required")
             finally:
                 server.shutdown()
                 server.server_close()
@@ -119,6 +147,23 @@ class LiveMonitorTests(unittest.TestCase):
             self.assertEqual(demo_admin.AUTH["status"], "authenticated")
             self.assertIn("TimeoutError", demo_admin.MONITOR["message"])
 
+    def test_visible_trade_page_without_api_does_not_claim_login(self):
+        class VisibleBrowser:
+            headless = False
+            list_url = None
+
+            def recover_page(self):
+                return True
+
+            def visible_trades_page(self, profile_url):
+                return True
+
+        auth = {"status": "waiting", "message": "Ожидаем входа"}
+        with patch.object(demo_admin, "AUTH", auth), patch.object(demo_admin, "MONITOR", {}):
+            self.assertFalse(demo_admin.handle_poll_error(
+                VisibleBrowser(), PulseError("Сделки не загрузились"), demo_admin.DEFAULTS["profile_url"]))
+        self.assertEqual(auth["status"], "waiting")
+
     def test_closed_headless_browser_keeps_saved_login_and_retries(self):
         class ClosedBrowser:
             headless = True
@@ -186,9 +231,34 @@ class LiveMonitorTests(unittest.TestCase):
 
     def test_profile_and_cursor(self):
         self.assertEqual(operations_url("https://www.tbank.ru/invest/social/profile/LinMath/")[0], "LinMath")
+        self.assertTrue(is_operations_page("https://www.tbank.ru/invest/social/profile/LinMath/operations?view=all",
+                                           "https://www.tbank.ru/invest/social/profile/LinMath/"))
+        self.assertFalse(is_operations_page("https://www.tbank.ru/invest/pulse/profile/Another/operations/",
+                                            "https://www.tbank.ru/invest/social/profile/LinMath/"))
         self.assertIn("nextCursor=next", with_cursor("https://www.tbank.ru/example?sessionId=secret", "next"))
         with self.assertRaises(Exception):
             operations_url("https://example.com/invest/social/profile/LinMath/")
+
+    def test_check_login_navigates_existing_tab_to_trades(self):
+        class Page:
+            url = "https://www.tbank.ru/invest/"
+
+            def is_closed(self):
+                return False
+
+            def goto(self, url, **kwargs):
+                self.url = url
+
+        browser = PulseBrowser(Path("unused"))
+        browser.page = Page()
+        browser.context = type("Context", (), {"pages": [browser.page]})()
+        browser.nickname_url = "old"
+        browser.instrument_urls = {"old": "old"}
+        browser.target_profile_id = "old"
+        browser.refresh(demo_admin.DEFAULTS["profile_url"])
+        self.assertTrue(is_operations_page(browser.page.url, demo_admin.DEFAULTS["profile_url"]))
+        self.assertIsNone(browser.nickname_url)
+        self.assertEqual(browser.instrument_urls, {})
 
     def test_baseline_new_buys_and_restart(self):
         with tempfile.TemporaryDirectory() as folder, patch.object(demo_admin, "STATE_PATH", Path(folder) / "state.json"), patch.object(demo_admin, "EVENTS_PATH", Path(folder) / "events.json"), patch.object(demo_admin, "EVENTS", []):
