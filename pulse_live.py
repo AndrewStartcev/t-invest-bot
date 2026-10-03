@@ -6,12 +6,58 @@ import json
 import os
 import re
 import time
+import ctypes
+from ctypes import wintypes
 from pathlib import Path
 from urllib.parse import parse_qsl, quote, unquote, urlencode, urlparse, urlunparse
 
 
 class PulseError(Exception):
     pass
+
+
+def visible_browser_windows() -> dict[int, int]:
+    """Return visible Chromium window handles and their pixel areas on Windows."""
+    if os.name != "nt":
+        return {}
+    user32 = ctypes.windll.user32
+    callback_type = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+
+    class Rect(ctypes.Structure):
+        _fields_ = [(name, ctypes.c_long) for name in ("left", "top", "right", "bottom")]
+
+    windows = {}
+
+    def collect(hwnd, _):
+        if not user32.IsWindowVisible(hwnd):
+            return True
+        name = ctypes.create_unicode_buffer(64)
+        user32.GetClassNameW(hwnd, name, len(name))
+        if name.value != "Chrome_WidgetWin_1":
+            return True
+        rect = Rect()
+        if user32.GetWindowRect(hwnd, ctypes.byref(rect)):
+            area = max(0, rect.right - rect.left) * max(0, rect.bottom - rect.top)
+            if area > 100_000:
+                windows[int(hwnd)] = area
+        return True
+
+    user32.EnumWindows(callback_type(collect), 0)
+    return windows
+
+
+def raise_browser_window(hwnd: int) -> None:
+    if os.name != "nt":
+        return
+    user32 = ctypes.windll.user32
+    user32.SetWindowPos.argtypes = [wintypes.HWND, wintypes.HWND, ctypes.c_int, ctypes.c_int,
+                                   ctypes.c_int, ctypes.c_int, wintypes.UINT]
+    user32.SetWindowPos.restype = wintypes.BOOL
+    user32.ShowWindow(hwnd, 9)  # SW_RESTORE
+    user32.SetForegroundWindow(hwnd)
+    flags = 0x0001 | 0x0002 | 0x0040  # SWP_NOSIZE | SWP_NOMOVE | SWP_SHOWWINDOW
+    user32.SetWindowPos(hwnd, -1, 0, 0, 0, 0, flags)  # bring forward without leaving it pinned
+    user32.SetWindowPos(hwnd, -2, 0, 0, 0, 0, flags)
 
 
 def is_tbank_cookie(cookie: dict) -> bool:
@@ -85,6 +131,8 @@ class PulseBrowser:
         self.profile_name = None
         self.request_headers = {}
         self.observed_api = set()
+        self.window_handles = set()
+        self.windows_before_open = set()
 
     def open(self, profile_url: str) -> None:
         try:
@@ -96,6 +144,7 @@ class PulseBrowser:
             raise PulseError("Brave, Edge или Chrome не найден. Задай PULSE_BROWSER_PATH")
         self.profile_name, url = operations_url(profile_url)
         self.profile_dir.mkdir(parents=True, exist_ok=True)
+        self.windows_before_open = set(visible_browser_windows()) if not self.headless else set()
         self.playwright = sync_playwright().start()
         try:
             self.context = self.playwright.chromium.launch_persistent_context(
@@ -115,9 +164,22 @@ class PulseBrowser:
             self.context.on("response", self._observe_response)
             self.page = self.context.pages[0] if self.context.pages else self.context.new_page()
             self.page.goto(url, wait_until="commit", timeout=45000)
+            if not self.headless:
+                self.window_handles = set(visible_browser_windows()) - self.windows_before_open
         except Exception:
             self.close()
             raise
+
+    def show(self) -> None:
+        self.page.bring_to_front()
+        if self.headless:
+            return
+        windows = visible_browser_windows()
+        candidates = {hwnd: windows[hwnd] for hwnd in self.window_handles if hwnd in windows}
+        if not candidates:
+            candidates = {hwnd: area for hwnd, area in windows.items() if hwnd not in self.windows_before_open}
+        if candidates:
+            raise_browser_window(max(candidates, key=candidates.get))
 
     def save_session(self) -> None:
         """Keep session cookies in the ignored local profile for the next browser run."""

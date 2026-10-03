@@ -296,7 +296,7 @@ def monitor_loop() -> None:
                             browser.close()
                         browser = PulseBrowser(ROOT / ".local" / "pulse-browser", headless=False)
                         browser.open(settings["profile_url"])
-                    browser.page.bring_to_front()
+                    browser.show()
                     next_poll = 0
                     with LOCK:
                         AUTH.update(status="waiting", message="Войди в Т-Банк в открытом окне. Проверка выполнится автоматически")
