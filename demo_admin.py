@@ -16,6 +16,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from demo_engine import DEFAULT_RULES, asset_type, simulate, validated_rules
+from broker_read import BrokerError, account_snapshot, read_only_accounts
 from telegram_notify import NotificationError, send_notification
 from pulse_live import PulseBrowser, PulseError, operations_url
 from pulse_replay import write_state
@@ -27,6 +28,8 @@ STATE_PATH = ROOT / ".local" / "pulse-live-state.json"
 EVENTS_PATH = ROOT / ".local" / "events.json"
 POSITIONS_PATH = ROOT / ".local" / "demo-positions.json"
 TOKEN_PATH = ROOT / ".local" / "telegram-token.txt"
+BROKER_TOKEN_PATH = ROOT / ".local" / "broker-read-token.txt"
+BROKER_ACCOUNT_PATH = ROOT / ".local" / "broker-account.txt"
 DEFAULTS = {
     "profile_url": "https://www.tbank.ru/invest/social/profile/LinMath/",
     "poll_seconds": 30,
@@ -43,6 +46,8 @@ HISTORY_REQUESTS = queue.Queue()
 MONITOR = {"status": "stopped", "message": "Мониторинг выключен", "last_check": None, "instrument_count": 0, "instruments": []}
 AUTH = {"status": "checking", "message": "Проверяем сохранённый вход в Пульс"}
 TODAY: list[dict] = []
+BROKER = {"status": "disconnected", "message": "Подключи токен T-Invest только для чтения", "accounts": [],
+          "selected_account_id": "", "snapshot": None, "last_check": None}
 SCENARIOS = {
     "stock_buy": {"ticker": "DEMO-R", "classCode": "TQBR", "name": "Демо · акция", "asset_type": "stock",
                   "side": "buy", "price": 500, "lot_size": 1, "currency": "rub"},
@@ -65,6 +70,61 @@ SCENARIOS = {
 
 def telegram_token() -> str:
     return os.environ.get("TELEGRAM_BOT_TOKEN") or (TOKEN_PATH.read_text(encoding="utf-8").strip() if TOKEN_PATH.exists() else "")
+
+
+def broker_token() -> str:
+    return (BROKER_TOKEN_PATH.read_text(encoding="utf-8").strip() if BROKER_TOKEN_PATH.exists() else "") or os.environ.get("TINVEST_READ_TOKEN", "")
+
+
+def save_private_text(path: Path, value: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp = path.with_suffix(".tmp")
+    temp.write_text(value, encoding="utf-8")
+    os.replace(temp, path)
+
+
+def connect_broker(candidate: str) -> dict:
+    token = candidate.strip() if candidate else broker_token()
+    if not token or len(token) > 1000 or any(char.isspace() for char in token):
+        raise ValueError("Введи токен T-Invest только для чтения")
+    accounts = read_only_accounts(token)
+    selected = BROKER_ACCOUNT_PATH.read_text(encoding="utf-8").strip() if BROKER_ACCOUNT_PATH.exists() else ""
+    if selected not in {account["id"] for account in accounts}:
+        selected = accounts[0]["id"]
+    if candidate:
+        save_private_text(BROKER_TOKEN_PATH, token)
+    save_private_text(BROKER_ACCOUNT_PATH, selected)
+    with LOCK:
+        BROKER.update(status="connected", message="Доступ только для чтения", accounts=accounts,
+                      selected_account_id=selected, snapshot=None, last_check=None)
+    return BROKER.copy()
+
+
+def select_broker_account(account_id: str) -> dict:
+    with LOCK:
+        if account_id not in {account["id"] for account in BROKER["accounts"]}:
+            raise ValueError("Выбери счёт из списка")
+        save_private_text(BROKER_ACCOUNT_PATH, account_id)
+        BROKER.update(selected_account_id=account_id, snapshot=None, last_check=None)
+    return refresh_broker()
+
+
+def refresh_broker() -> dict:
+    token = broker_token()
+    if not token:
+        raise ValueError("Сначала подключи токен T-Invest")
+    with LOCK:
+        account_id = BROKER["selected_account_id"]
+        accounts = BROKER["accounts"]
+    if not account_id or account_id not in {account["id"] for account in accounts}:
+        connect_broker("")
+        with LOCK:
+            account_id = BROKER["selected_account_id"]
+    snapshot = account_snapshot(token, account_id)
+    with LOCK:
+        BROKER.update(status="connected", message="Счёт обновлён · доступ только для чтения",
+                      snapshot=snapshot, last_check=datetime.now(timezone.utc).isoformat())
+        return BROKER.copy()
 
 
 def save_telegram_token(value: str) -> None:
@@ -467,6 +527,7 @@ class Handler(BaseHTTPRequestHandler):
                 authenticated = AUTH["status"] == "authenticated"
                 self.respond(200, {"settings": load_settings(), "token_configured": bool(telegram_token()),
                                    "events": EVENTS, "demo_positions": POSITIONS,
+                                   "broker_token_configured": bool(broker_token()), "broker": BROKER.copy(),
                                    "monitor": MONITOR if authenticated else {"status": "stopped", "message": "Ожидаем входа в Пульс", "last_check": None, "instrument_count": 0, "instruments": []},
                                    "auth": AUTH, "today": TODAY if authenticated else []})
         else:
@@ -490,11 +551,24 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError("Нужен объект JSON")
             with LOCK:
                 authenticated = AUTH["status"] == "authenticated"
-            if not authenticated and self.path not in {"/api/auth/start", "/api/browser/show", "/api/auth/check", "/api/settings", "/api/demo", "/api/demo/scenario", "/api/demo/reset", "/api/telegram/test"}:
+            if not authenticated and self.path not in {"/api/auth/start", "/api/browser/show", "/api/auth/check", "/api/settings", "/api/demo", "/api/demo/scenario", "/api/demo/reset", "/api/telegram/test", "/api/broker/connect", "/api/broker/select", "/api/broker/refresh"}:
                 self.respond(403, {"error": "Сначала авторизуйся в Пульсе"})
                 return
             if self.path == "/api/settings":
                 self.respond(200, {"settings": save_settings(data)})
+            elif self.path == "/api/broker/connect":
+                candidate = data.get("token", "")
+                if not isinstance(candidate, str):
+                    raise ValueError("Некорректный токен T-Invest")
+                connect_broker(candidate)
+                self.respond(200, {"broker": refresh_broker()})
+            elif self.path == "/api/broker/select":
+                account_id = data.get("account_id")
+                if not isinstance(account_id, str):
+                    raise ValueError("Выбери счёт из списка")
+                self.respond(200, {"broker": select_broker_account(account_id)})
+            elif self.path == "/api/broker/refresh":
+                self.respond(200, {"broker": refresh_broker()})
             elif self.path == "/api/demo":
                 side = data.get("side")
                 if side not in {"buy", "sell"}:
@@ -605,6 +679,10 @@ class Handler(BaseHTTPRequestHandler):
                 self.respond(200, {"event": event})
             else:
                 self.respond(404, {"error": "Не найдено"})
+        except BrokerError as error:
+            with LOCK:
+                BROKER.update(status="error", message=str(error))
+            self.respond(503, {"error": str(error)})
         except (ValueError, json.JSONDecodeError) as error:
             self.respond(400, {"error": str(error)})
 

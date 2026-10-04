@@ -94,7 +94,7 @@
     .settings-grid { display:grid; grid-template-columns:minmax(0,1.15fr) minmax(300px,.85fr); gap:20px; align-items:start; }
     .field { margin-bottom:18px; }
     .field label { display:block; color:#344a65; font-size:12px; font-weight:720; margin-bottom:7px; }
-    .field input { width:100%; height:41px; border:1px solid #cfd9e6; border-radius:6px; padding:0 11px; background:#fff; color:#1b2e48; font-size:12px; }
+    .field input, .field select { width:100%; height:41px; border:1px solid #cfd9e6; border-radius:6px; padding:0 11px; background:#fff; color:#1b2e48; font-size:12px; }
     .field small { display:block; color:#8999ac; font-size:11px; line-height:1.45; margin-top:6px; }
     .field-row { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
     .segment { display:grid; grid-template-columns:1fr 1fr; gap:4px; padding:4px; border:1px solid #dbe4ee; border-radius:8px; background:#f3f6fa; }
@@ -184,7 +184,7 @@
                 <p class="muted space-top" id="source-message">Подключаемся к Пульсу…</p>
                 <button class="button neutral small space-top" id="refresh-source" type="button">Проверить данные</button>
               </div></section>
-              <section class="panel"><div class="panel-head"><h2>Наш результат</h2><span class="tag">Только демо</span></div><div class="panel-body"><p class="subtle">Условный портфель для проверки правил. Брокерский счёт и реальные деньги не подключены.</p><div class="source-line space-top"><span>Тестовых операций</span><b id="demo-total">0</b></div><div class="source-line"><span>Демо-позиций</span><b id="demo-position-count">0</b></div><div id="demo-positions" class="portfolio-list muted">Позиций пока нет</div><div class="source-line"><span>Последний демо-сигнал</span><b id="last-demo-decision">—</b></div><div class="source-line"><span>Брокерские заявки</span><b>Не выставлялись</b></div></div></section>
+              <section class="panel"><div class="panel-head"><h2>Наш результат</h2><span class="tag">Только демо</span></div><div class="panel-body"><p class="subtle">Условный портфель для проверки правил. Реальный счёт показан отдельно ниже.</p><div class="source-line space-top"><span>Тестовых операций</span><b id="demo-total">0</b></div><div class="source-line"><span>Демо-позиций</span><b id="demo-position-count">0</b></div><div id="demo-positions" class="portfolio-list muted">Позиций пока нет</div><div class="source-line"><span>Последний демо-сигнал</span><b id="last-demo-decision">—</b></div><div class="source-line"><span>Брокерские заявки</span><b>Не выставлялись</b></div><hr><div class="source-line"><span>Реальный счёт · чтение</span><b id="broker-overview-status">Не подключён</b></div><div class="source-line"><span>Доступные рубли</span><b id="broker-overview-cash">—</b></div><div class="source-line"><span>Позиций на счёте</span><b id="broker-overview-positions">—</b></div></div></section>
             </div>
             <section class="panel"><div class="panel-head"><h2>Сделки автора за 24 часа</h2><span class="tag" id="today-count">0 сделок</span></div><div id="today-list" class="empty">Сделки пока не загружены</div></section>
             <div class="details-grid">
@@ -213,8 +213,9 @@
               <div class="form-actions"><button class="button" type="submit">Сохранить настройки</button><button class="button neutral" id="open-pulse" type="button">Открыть окно Пульса</button><span class="toast" id="settings-message" role="status"></span></div>
             </form></section>
             <div class="stack">
+              <section class="panel"><div class="panel-head"><h2>Брокерский счёт</h2><span class="tag">Только чтение</span></div><div class="panel-body"><p class="subtle">Подключи токен T-Invest с правом «только чтение». Он остаётся на этом компьютере. Реальные заявки отключены.</p><div class="field space-top"><label for="broker-token">Токен T-Invest</label><input id="broker-token" type="password" autocomplete="new-password" placeholder="Вставь токен только для чтения"><small id="broker-token-hint">Сохранённый токен здесь не отображается</small></div><div class="form-actions"><button class="button" id="broker-connect" type="button">Подключить</button><button class="button neutral" id="broker-refresh" type="button">Обновить счёт</button></div><div class="field space-top"><label for="broker-account">Счёт</label><select id="broker-account"></select></div><p class="toast space-top" id="broker-message" role="status"></p><div class="source-line"><span>Доступные рубли</span><b id="broker-cash">—</b></div><div class="source-line"><span>Стоимость портфеля</span><b id="broker-total">—</b></div><div class="source-line"><span>Позиции</span><b id="broker-position-count">—</b></div><div id="broker-positions" class="portfolio-list muted">Подключи счёт, чтобы увидеть позиции</div><small id="broker-updated">—</small></div></section>
               <section class="panel" id="scenario-panel"><div class="panel-head"><h2>Проверка сценария</h2><span class="tag">Демо</span></div><div class="panel-body"><p class="subtle">Запусти по порядку: покупка, продажа, дорогая акция, затем фьючерсы. Решение и причина появятся в журнале.</p><div class="scenario-buttons space-top"><button class="button ghost" data-scenario="stock_buy" type="button">Купить акцию · 500 ₽</button><button class="button neutral" data-scenario="stock_sell" type="button">Продать свою акцию</button><button class="button ghost" data-scenario="expensive_stock" type="button">Дорогая акция · 8 000 ₽</button><button class="button neutral" data-scenario="bond_buy" type="button">Купить облигацию · 1 000 ₽</button><button class="button ghost" data-scenario="fund_buy" type="button">Купить фонд · 250 ₽</button><button class="button neutral" data-scenario="future_over_limit" type="button">Фьючерс · ГО 27 000 ₽</button><button class="button ghost" data-scenario="future_buy" type="button">Фьючерс · ГО 9 000 ₽</button><button class="button neutral" data-scenario="future_sell" type="button">Закрыть фьючерс</button></div><div class="form-actions"><button class="button neutral small" id="reset-demo" type="button">Сбросить демо и тестовые записи</button></div><p class="muted space-top">Заявки брокеру не отправляются. Telegram получит сообщение только если задан ID и токен.</p><span class="toast" id="demo-message" role="status"></span></div></section>
-              <section class="panel"><div class="panel-head"><h2>Статус подключения</h2></div><div class="panel-body"><div class="source-line"><span>Пульс</span><b id="auth-summary">—</b></div><div class="source-line"><span>Telegram-бот</span><b id="bot-summary">—</b></div><div class="source-line"><span>Брокерский счёт</span><b>Не подключён</b></div></div></section>
+              <section class="panel"><div class="panel-head"><h2>Статус подключения</h2></div><div class="panel-body"><div class="source-line"><span>Пульс</span><b id="auth-summary">—</b></div><div class="source-line"><span>Telegram-бот</span><b id="bot-summary">—</b></div><div class="source-line"><span>Брокерский счёт</span><b id="broker-summary">Не подключён</b></div></div></section>
             </div>
           </div>
         </section>
@@ -357,8 +358,30 @@
       for(const asset of ['stock','bond','fund'])for(const [suffix,key] of [['budget','budget'],['lot','single_lot_cap'],['position','position_cap']])el(asset+'-'+suffix).value=rules[asset][key];
       el('future-margin').value=rules.future.margin_budget;el('future-contracts').value=rules.future.max_contracts;el('sell-percent').value=rules.sell_percent;
     }
+    function renderBroker(state){
+      const broker=state.broker||{},snapshot=broker.snapshot;
+      const account=broker.accounts?.find(item=>item.id===broker.selected_account_id);
+      const label=broker.status==='connected'?(account?.name||'Подключён'):broker.status==='error'?'Ошибка':'Не подключён';
+      for(const id of ['broker-summary','broker-overview-status'])el(id).textContent=label;
+      const cash=snapshot?Number(snapshot.cash_rub).toLocaleString('ru-RU')+' ₽':'—';
+      const count=snapshot?snapshot.positions.length:'—';
+      el('broker-overview-cash').textContent=el('broker-cash').textContent=cash;
+      el('broker-overview-positions').textContent=el('broker-position-count').textContent=count;
+      el('broker-total').textContent=snapshot?.total_rub!==null&&snapshot?.total_rub!==undefined?Number(snapshot.total_rub).toLocaleString('ru-RU')+' ₽':'—';
+      el('broker-token-hint').textContent=state.broker_token_configured?'Токен сохранён локально; введи новый, чтобы заменить':'Сохранённый токен здесь не отображается';
+      el('broker-updated').textContent=broker.last_check?'Обновлено: '+fmtDate(broker.last_check):'Данные ещё не загружены';
+      const selector=el('broker-account'),current=selector.value;selector.replaceChildren();
+      for(const item of broker.accounts||[]){const option=document.createElement('option');option.value=item.id;option.textContent=item.name+' · '+item.id.slice(-4);selector.append(option);}
+      selector.value=broker.selected_account_id||current;
+      selector.disabled=!broker.accounts?.length;
+      const list=el('broker-positions');list.replaceChildren();
+      if(!snapshot?.positions?.length)list.textContent=snapshot?'Позиций пока нет':'Подключи счёт, чтобы увидеть позиции';
+      for(const item of snapshot?.positions||[]){const row=document.createElement('div');row.className='source-line';const name=document.createElement('span'),value=document.createElement('b');name.textContent=item.ticker+(item.class_code?' · '+item.class_code:'');value.textContent=item.available+(item.blocked?' + '+item.blocked+' заблокировано':'');row.append(name,value);list.append(row);}
+      if(broker.status==='error')el('broker-message').textContent=broker.message;
+    }
     function renderState(state){
       renderAuth(state.auth);instruments=state.monitor.instruments||[];today=state.today||[];events=state.events||[];
+      renderBroker(state);
       const profile=new URL(state.settings.profile_url).pathname.split('/').filter(Boolean).at(-1);
       el('profile-heading').textContent=profile+' · профиль Пульса';el('source-profile').textContent=profile;
       el('source-mode').textContent=state.settings.monitoring_enabled?'Живой мониторинг':'Демо';
@@ -396,7 +419,17 @@
       el('profile').value=state.settings.profile_url;el('interval').value=state.settings.poll_seconds;el('chat').value=state.settings.chat_id;
       el('paused').checked=state.settings.paused;el('auto-buy').checked=state.settings.auto_demo_buy;setMode(state.settings.monitoring_enabled);fillRules(state.settings.rules);
       renderState(state);
+      if(state.broker_token_configured&&state.broker.status==='disconnected')api('/api/broker/refresh',{}).then(refresh).catch(error=>el('broker-message').textContent=error.message);
     }
+    async function brokerAction(path,payload,button){
+      const message=el('broker-message');button.disabled=true;message.className='toast space-top';message.textContent='Подключаемся к T-Invest…';
+      try{await api(path,payload);el('broker-token').value='';message.textContent='Данные счёта обновлены';await refresh();}
+      catch(error){message.className='toast error space-top';message.textContent=error.message;}
+      finally{button.disabled=false;}
+    }
+    el('broker-connect').addEventListener('click',()=>brokerAction('/api/broker/connect',{token:el('broker-token').value},el('broker-connect')));
+    el('broker-refresh').addEventListener('click',()=>brokerAction('/api/broker/refresh',{},el('broker-refresh')));
+    el('broker-account').addEventListener('change',()=>brokerAction('/api/broker/select',{account_id:el('broker-account').value},el('broker-account')));
     el('settings-form').addEventListener('submit',async event=>{
       event.preventDefault();const message=el('settings-message');
       try{await api('/api/settings',{profile_url:el('profile').value,poll_seconds:Number(el('interval').value),chat_id:el('chat').value,telegram_token:el('token').value,paused:el('paused').checked,monitoring_enabled:liveMode,auto_demo_buy:el('auto-buy').checked,rules:ruleValues()});
