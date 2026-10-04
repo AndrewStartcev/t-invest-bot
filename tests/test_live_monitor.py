@@ -45,6 +45,9 @@ class LiveMonitorTests(unittest.TestCase):
                          {"items": [], "hasNext": False, "nextCursor": None})
         self.assertIn("/operation/instrument/1COV%40DE/SPBXM", requested[0])
         self.assertIn("sessionId=test", requested[0])
+        browser.history("1COV@DE", "SPBXM", 123456789)
+        self.assertIn("cursor=123456789", requested[1])
+        self.assertNotIn("nextCursor=", requested[1])
         with self.assertRaisesRegex(PulseError, "История инструмента недоступна"):
             browser.history("..", "SPBXM")
 
@@ -329,6 +332,7 @@ class LiveMonitorTests(unittest.TestCase):
         self.assertFalse(is_operations_page("https://www.tbank.ru/invest/pulse/profile/Another/operations/",
                                             "https://www.tbank.ru/invest/social/profile/LinMath/"))
         self.assertIn("nextCursor=next", with_cursor("https://www.tbank.ru/example?sessionId=secret", "next"))
+        self.assertIn("cursor=next", with_cursor("https://www.tbank.ru/example?sessionId=secret", "next", parameter="cursor"))
         with self.assertRaises(Exception):
             operations_url("https://example.com/invest/social/profile/LinMath/")
 

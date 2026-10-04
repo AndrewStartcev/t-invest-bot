@@ -94,10 +94,13 @@ def is_operations_page(page_url: str, profile_url: str) -> bool:
             and unquote(match.group(1)).casefold() == unquote(name).casefold())
 
 
-def with_cursor(url: str, cursor: str | int) -> str:
+def with_cursor(url: str, cursor: str | int, *, parameter: str = "nextCursor") -> str:
+    if parameter not in {"nextCursor", "cursor"}:
+        raise ValueError("Неизвестный параметр пагинации")
     parsed = urlparse(url)
-    query = [(key, value) for key, value in parse_qsl(parsed.query, keep_blank_values=True) if key != "nextCursor"]
-    query.append(("nextCursor", cursor))
+    query = [(key, value) for key, value in parse_qsl(parsed.query, keep_blank_values=True)
+             if key not in {"nextCursor", "cursor"}]
+    query.append((parameter, cursor))
     return urlunparse(parsed._replace(query=urlencode(query)))
 
 
@@ -320,7 +323,8 @@ class PulseBrowser:
                 next_cursor = None
                 visited = set()
                 while len(history) < needed:
-                    page = payload(self._fetch(with_cursor(history_url, next_cursor) if next_cursor else history_url))
+                    page = payload(self._fetch(with_cursor(history_url, next_cursor, parameter="cursor")
+                                               if next_cursor is not None else history_url))
                     history.extend(page["items"])
                     if len(history) >= needed:
                         break
@@ -345,7 +349,7 @@ class PulseBrowser:
         parsed = urlparse(self.list_url)
         path = parsed.path.rsplit("/instrument", 1)[0] + f"/operation/instrument/{quote(ticker, safe='')}/{quote(class_code, safe='')}"
         url = urlunparse(parsed._replace(path=path))
-        data = payload(self._fetch(with_cursor(url, cursor) if cursor is not None else url))
+        data = payload(self._fetch(with_cursor(url, cursor, parameter="cursor") if cursor is not None else url))
         return {"items": [{key: item.get(key) for key in ("tradeDateTime", "action", "currency", "averagePrice")}
                           for item in data["items"]], "hasNext": bool(data.get("hasNext")), "nextCursor": data.get("nextCursor")}
 
