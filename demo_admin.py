@@ -50,9 +50,10 @@ POSITIONS: dict = json.loads(POSITIONS_PATH.read_text(encoding="utf-8")) if POSI
 LOCK = threading.RLock()
 TRADE_FLOW_LOCK = threading.Lock()
 HISTORY_REQUESTS = queue.Queue()
-MONITOR = {"status": "stopped", "message": "Мониторинг выключен", "last_check": None, "instrument_count": 0, "instruments": []}
+MONITOR = {"status": "stopped", "message": "Мониторинг выключен", "last_check": None, "profile": "", "instrument_count": 0, "instruments": []}
 AUTH = {"status": "checking", "message": "Проверяем сохранённый вход в Пульс"}
 TODAY: list[dict] = []
+MONTH = {"status": "idle", "items": [], "processed": 0, "total": 0, "message": "", "loaded_at": None}
 BROKER = {"status": "disconnected", "message": "Подключи токен T-Invest только для чтения", "accounts": [],
           "selected_account_id": "", "snapshot": None, "last_check": None}
 TRADING = {"status": "disconnected", "message": "Торговый токен не подключён", "accounts": [],
@@ -493,46 +494,105 @@ def confirm_real_preview(preview_id: str) -> dict:
     return order
 
 
-def recent_profile_trades(browser: PulseBrowser, profile: str, instruments: list[dict]) -> list[dict]:
-    cutoff = datetime.now(timezone.utc) - timedelta(days=1)
+def append_history_page(found: list[dict], page: dict, item: dict, profile: str,
+                        cutoff: datetime, occurrences: dict) -> bool:
+    older = False
+    for trade in page["items"]:
+        try:
+            trade_time = datetime.fromisoformat(trade["tradeDateTime"])
+            if trade_time.tzinfo is None:
+                raise ValueError("no timezone")
+        except (KeyError, TypeError, ValueError):
+            raise PulseError(f"Неизвестная дата сделки {item['ticker']}") from None
+        if trade_time < cutoff:
+            older = True
+            continue
+        signature = (trade["tradeDateTime"], trade.get("action"), str(trade.get("averagePrice")))
+        occurrence = occurrences.get(signature, 0)
+        occurrences[signature] = occurrence + 1
+        identity = f"{profile}:{item['ticker']}:{item['classCode']}:{signature}:{occurrence}"
+        kind = asset_type(item.get("type", ""), item["classCode"])
+        found.append({
+            "id": hashlib.sha256(identity.encode()).hexdigest()[:24], "profile": profile,
+            "ticker": item["ticker"], "classCode": item["classCode"], "name": item["showName"],
+            "asset_type": kind, "action": trade.get("action"), "tradeDateTime": trade["tradeDateTime"],
+            "price": trade.get("averagePrice"), "currency": trade.get("currency"),
+            "can_demo_buy": kind in {"stock", "bond", "fund"} and trade.get("action") == "buy"
+                            and trade_time >= datetime.now(timezone.utc) - timedelta(days=1),
+        })
+    return older
+
+
+def next_history_cursor(page: dict, seen_cursors: set, ticker: str) -> str | int:
+    cursor = page.get("nextCursor")
+    if type(cursor) not in (str, int) or cursor == "" or cursor in seen_cursors:
+        raise PulseError(f"Не удалось прочитать всю историю {ticker}")
+    seen_cursors.add(cursor)
+    return cursor
+
+
+def recent_profile_trades(browser: PulseBrowser, profile: str, instruments: list[dict], *,
+                          cutoff: datetime | None = None, max_pages: int = 100) -> list[dict]:
+    cutoff = cutoff or datetime.now(timezone.utc) - timedelta(days=1)
     found = []
+    for item in month_targets(instruments, cutoff):
+        cursor = None
+        seen_cursors = set()
+        occurrences = {}
+        for _ in range(max_pages):
+            page = browser.history(item["ticker"], item["classCode"], cursor)
+            older = append_history_page(found, page, item, profile, cutoff, occurrences)
+            if older or not page.get("hasNext"):
+                break
+            cursor = next_history_cursor(page, seen_cursors, item["ticker"])
+        else:
+            raise PulseError(f"Слишком много страниц истории {item['ticker']}")
+    return sorted(found, key=lambda trade: trade["tradeDateTime"], reverse=True)
+
+
+def month_targets(instruments: list[dict], cutoff: datetime) -> list[dict]:
+    result = []
     for item in instruments:
         latest = item.get("maxTradeDateTime")
-        try:
-            if not latest or datetime.fromisoformat(latest) < cutoff:
-                continue
-        except (TypeError, ValueError):
+        if not latest:
             continue
-        cursor = None
-        occurrences = {}
-        for _ in range(10):
-            page = browser.history(item["ticker"], item["classCode"], cursor)
-            older = False
-            for trade in page["items"]:
-                try:
-                    trade_time = datetime.fromisoformat(trade["tradeDateTime"])
-                except (KeyError, TypeError, ValueError):
-                    continue
-                if trade_time < cutoff:
-                    older = True
-                    continue
-                signature = (trade["tradeDateTime"], trade.get("action"), str(trade.get("averagePrice")))
-                occurrence = occurrences.get(signature, 0)
-                occurrences[signature] = occurrence + 1
-                identity = f"{profile}:{item['ticker']}:{item['classCode']}:{signature}:{occurrence}"
-                found.append({
-                    "id": hashlib.sha256(identity.encode()).hexdigest()[:24], "profile": profile,
-                    "ticker": item["ticker"], "classCode": item["classCode"], "name": item["showName"],
-                    "asset_type": asset_type(item.get("type", ""), item["classCode"]),
-                    "action": trade.get("action"), "tradeDateTime": trade["tradeDateTime"],
-                    "price": trade.get("averagePrice"), "currency": trade.get("currency"),
-                    "can_demo_buy": asset_type(item.get("type", ""), item["classCode"]) in {"stock", "bond", "fund"}
-                                    and trade.get("action") == "buy",
-                })
-            cursor = page.get("nextCursor")
-            if older or not page.get("hasNext") or cursor is None:
-                break
-    return sorted(found, key=lambda trade: trade["tradeDateTime"], reverse=True)
+        try:
+            latest_time = datetime.fromisoformat(latest)
+            if latest_time.tzinfo is None:
+                raise ValueError("no timezone")
+            if latest_time >= cutoff:
+                result.append(item.copy())
+        except (KeyError, TypeError, ValueError):
+            raise PulseError(f"Неизвестная дата последней сделки {item['ticker']}") from None
+    return result
+
+
+def advance_month_scan(browser: PulseBrowser, scan: dict, batch_size: int = 1) -> bool:
+    """Read a few history pages in the monitor thread between regular polls."""
+    for _ in range(batch_size):
+        if scan["index"] >= len(scan["targets"]):
+            with LOCK:
+                MONTH.update(status="ready", items=sorted(scan["found"], key=lambda item: item["tradeDateTime"], reverse=True),
+                             processed=scan["index"], message="История за 30 дней загружена",
+                             loaded_at=datetime.now(timezone.utc).isoformat())
+            return True
+        item = scan["targets"][scan["index"]]
+        page = browser.history(item["ticker"], item["classCode"], scan["cursor"])
+        scan["pages"] += 1
+        if scan["pages"] > 500:
+            raise PulseError(f"Слишком много страниц истории {item['ticker']}")
+        older = append_history_page(scan["found"], page, item, scan["profile"], scan["cutoff"], scan["occurrences"])
+        if older or not page.get("hasNext"):
+            scan["index"] += 1
+            scan["cursor"] = None
+            scan["seen_cursors"] = set()
+            scan["occurrences"] = {}
+            scan["pages"] = 0
+        else:
+            scan["cursor"] = next_history_cursor(page, scan["seen_cursors"], item["ticker"])
+        with LOCK:
+            MONTH.update(processed=scan["index"], message=f"Проверено инструментов: {scan['index']} из {len(scan['targets'])}; страниц текущего: {scan['pages']}")
+    return False
 
 
 def poll_once(browser: PulseBrowser, settings: dict, *, emit_events: bool = True) -> None:
@@ -577,7 +637,7 @@ def poll_once(browser: PulseBrowser, settings: dict, *, emit_events: bool = True
     if session_warning:
         recent_message += "; браузерную сессию не удалось сохранить"
     with LOCK:
-        MONITOR.update(status="running", message=recent_message, last_check=datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds"), instrument_count=len(instruments),
+        MONITOR.update(status="running", message=recent_message, last_check=datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds"), profile=profile, instrument_count=len(instruments),
                        instruments=[{key: item.get(key) for key in ("ticker", "classCode", "showName", "type", "totalOperationsCount", "maxTradeDateTime")} for item in instruments])
         TODAY[:] = recent
         AUTH.update(status="authenticated", message="Вход в Пульс подтверждён")
@@ -658,6 +718,7 @@ def handle_poll_error(browser: PulseBrowser, error: Exception, profile_url: str)
 
 def monitor_loop() -> None:
     browser = None
+    month_scan = None
     last_profile = None
     next_poll = 0.0
     next_ui_probe = 0.0
@@ -673,20 +734,22 @@ def monitor_loop() -> None:
                 except Exception:
                     pass
             browser = None
+            month_scan = None
             last_profile = profile
             next_poll = 0
             next_reconnect = 0
             reconnect_delay = 3.0
             with LOCK:
+                MONTH.update(status="idle", items=[], processed=0, total=0, message="", loaded_at=None)
                 if AUTH["status"] == "authenticated":
                     MONITOR.update(status="checking", message="Загружаем сделки выбранного профиля")
-                    MONITOR.update(instrument_count=0, instruments=[])
+                    MONITOR.update(profile="", instrument_count=0, instruments=[])
                     TODAY.clear()
                 else:
                     AUTH.update(status="checking", message="Проверяем сохранённый вход в Пульс")
 
         try:
-            request = HISTORY_REQUESTS.get(timeout=0.5)
+            request = HISTORY_REQUESTS.get(timeout=0.1 if month_scan else 0.5)
         except queue.Empty:
             request = None
         if request:
@@ -714,11 +777,27 @@ def monitor_loop() -> None:
                         next_reconnect = 0
                 elif request["action"] == "history" and browser and AUTH["status"] == "authenticated":
                     request["result"] = browser.history(request["ticker"], request["class_code"], request["cursor"])
+                elif request["action"] == "month" and browser and AUTH["status"] == "authenticated":
+                    cutoff = datetime.now(timezone.utc) - timedelta(days=30)
+                    with LOCK:
+                        targets = month_targets(MONITOR["instruments"], cutoff)
+                        MONTH.update(status="loading", items=[], processed=0, total=len(targets),
+                                     message="Читаем историю за 30 дней", loaded_at=None)
+                    month_scan = {"profile": operations_url(settings["profile_url"])[0], "cutoff": cutoff,
+                                  "targets": targets, "index": 0, "found": [], "cursor": None,
+                                  "seen_cursors": set(), "occurrences": {}, "pages": 0}
+                elif request["action"] == "month":
+                    with LOCK:
+                        MONTH.update(status="error", message="Сначала подключи Пульс")
                 else:
                     request["error"] = "Сначала авторизуйся в Пульсе"
             except Exception as error:
                 if request["action"] == "history":
                     request["error"] = str(error) if isinstance(error, PulseError) else "История не загрузилась"
+                elif request["action"] == "month":
+                    month_scan = None
+                    with LOCK:
+                        MONTH.update(status="error", message=str(error) if isinstance(error, PulseError) else "История за месяц не загрузилась")
                 else:
                     with LOCK:
                         AUTH.update(status="required", message=str(error) if isinstance(error, PulseError) else f"Окно Пульса не открылось ({type(error).__name__})")
@@ -785,6 +864,20 @@ def monitor_loop() -> None:
                     reconnect_delay = min(reconnect_delay * 2, 60)
             next_poll = time.monotonic() + (settings["poll_seconds"] if AUTH["status"] == "authenticated" else 3)
 
+        if month_scan and browser and AUTH["status"] == "authenticated":
+            try:
+                if advance_month_scan(browser, month_scan):
+                    month_scan = None
+            except Exception as error:
+                month_scan = None
+                with LOCK:
+                    MONTH.update(status="error", items=[], message=str(error) if isinstance(error, PulseError)
+                                 else "История за месяц не загрузилась; попробуй снова")
+        elif month_scan:
+            month_scan = None
+            with LOCK:
+                MONTH.update(status="error", items=[], message="Пульс отключился во время загрузки; попробуй снова")
+
 
 class LocalHTTPServer(ThreadingHTTPServer):
     allow_reuse_address = False
@@ -826,8 +919,9 @@ class Handler(BaseHTTPRequestHandler):
                                    "broker_token_configured": bool(broker_token()), "broker": BROKER.copy(),
                                    "trade_token_configured": bool(trade_token()), "trading": TRADING.copy(),
                                    "real_orders": list(REAL_ORDERS.values())[-30:], "real_order_count": len(REAL_ORDERS),
-                                   "monitor": MONITOR if authenticated else {"status": "stopped", "message": "Ожидаем входа в Пульс", "last_check": None, "instrument_count": 0, "instruments": []},
-                                   "auth": AUTH, "today": TODAY if authenticated else []})
+                                   "monitor": MONITOR if authenticated else {"status": "stopped", "message": "Ожидаем входа в Пульс", "last_check": None, "profile": "", "instrument_count": 0, "instruments": []},
+                                   "auth": AUTH, "today": TODAY if authenticated else [],
+                                   "month": MONTH.copy() if authenticated else {"status": "idle", "items": [], "processed": 0, "total": 0, "message": "", "loaded_at": None}})
         else:
             self.respond(404, {"error": "Не найдено"})
 
@@ -863,6 +957,15 @@ class Handler(BaseHTTPRequestHandler):
                 if enabled:
                     settings["monitoring_enabled"] = True
                 self.respond(200, {"settings": save_settings(settings)})
+            elif self.path == "/api/month":
+                with LOCK:
+                    if not MONITOR["instruments"] or MONITOR.get("profile", "").casefold() != operations_url(load_settings()["profile_url"])[0].casefold():
+                        raise ValueError("Сначала дождись списка инструментов Пульса")
+                    if MONTH["status"] != "loading":
+                        MONTH.update(status="loading", items=[], processed=0, total=0,
+                                     message="Готовим историю за 30 дней", loaded_at=None)
+                        HISTORY_REQUESTS.put({"action": "month"})
+                self.respond(202, {"ok": True})
             elif self.path == "/api/broker/connect":
                 candidate = data.get("token", "")
                 if not isinstance(candidate, str):

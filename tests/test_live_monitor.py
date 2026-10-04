@@ -31,6 +31,58 @@ class FakeBrowser:
 
 
 class LiveMonitorTests(unittest.TestCase):
+    def test_month_history_reads_all_pages_and_keeps_old_trades_read_only(self):
+        now = datetime.now(timezone.utc)
+        def trade(days, action="buy"):
+            return {"tradeDateTime": (now - timedelta(days=days)).isoformat(),
+                    "action": action, "averagePrice": 100, "currency": "rub"}
+        class Browser:
+            def __init__(self):
+                self.cursors = []
+
+            def history(self, ticker, class_code, cursor=None):
+                self.cursors.append(cursor)
+                if cursor is None:
+                    return {"items": [trade(2), trade(8)], "hasNext": True, "nextCursor": "second"}
+                return {"items": [trade(29), trade(31)], "hasNext": True, "nextCursor": "third"}
+        browser = Browser()
+        instrument = {"ticker": "ROSN", "classCode": "TQBR", "showName": "Роснефть", "type": "stock",
+                      "maxTradeDateTime": (now - timedelta(days=2)).isoformat()}
+        cutoff = now - timedelta(days=30)
+        self.assertEqual(len(demo_admin.month_targets([instrument], cutoff)), 1)
+        with patch.object(demo_admin, "MONTH", {"status": "loading", "items": [], "processed": 0, "total": 1}):
+            scan = {"profile": "LinMath", "cutoff": cutoff, "targets": [instrument], "index": 0, "found": [],
+                    "cursor": None, "seen_cursors": set(), "occurrences": {}, "pages": 0}
+            self.assertFalse(demo_admin.advance_month_scan(browser, scan, batch_size=1))
+            self.assertFalse(demo_admin.advance_month_scan(browser, scan, batch_size=1))
+            self.assertTrue(demo_admin.advance_month_scan(browser, scan, batch_size=1))
+            self.assertEqual(len(demo_admin.MONTH["items"]), 3)
+            self.assertTrue(all(not item["can_demo_buy"] for item in demo_admin.MONTH["items"]))
+            self.assertEqual(browser.cursors, [None, "second"])
+
+    def test_month_request_queues_background_scan(self):
+        requests = queue.Queue()
+        monitor = {"status": "running", "profile": "LinMath", "instruments": [{"ticker": "ROSN"}]}
+        month = {"status": "idle", "items": [], "processed": 0, "total": 0, "message": "", "loaded_at": None}
+        with patch.object(demo_admin, "AUTH", {"status": "authenticated"}), \
+                patch.object(demo_admin, "MONITOR", monitor), patch.object(demo_admin, "MONTH", month), \
+                patch.object(demo_admin, "HISTORY_REQUESTS", requests), \
+                patch.object(demo_admin, "load_settings", return_value=demo_admin.DEFAULTS):
+            server = ThreadingHTTPServer(("127.0.0.1", 0), demo_admin.Handler)
+            worker = threading.Thread(target=server.serve_forever, daemon=True)
+            worker.start()
+            try:
+                request = Request(f"http://127.0.0.1:{server.server_port}/api/month",
+                                  data=b"{}", headers={"Content-Type": "application/json"})
+                with urlopen(request, timeout=2) as response:
+                    self.assertEqual(response.status, 202)
+                self.assertEqual(month["status"], "loading")
+                self.assertEqual(requests.get_nowait()["action"], "month")
+            finally:
+                server.shutdown()
+                server.server_close()
+                worker.join(timeout=2)
+
     def test_second_admin_cannot_bind_same_port(self):
         first = demo_admin.LocalHTTPServer(("127.0.0.1", 0), demo_admin.Handler)
         try:

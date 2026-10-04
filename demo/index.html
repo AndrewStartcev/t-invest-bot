@@ -197,7 +197,7 @@
               </div></section>
               <section class="panel"><div class="panel-head"><h2>Наш результат</h2><span class="tag">Симуляция / брокер</span></div><div class="panel-body"><p class="subtle">Условный портфель и реальные заявки учитываются раздельно.</p><div class="source-line space-top"><span>Условных операций</span><b id="demo-total">0</b></div><div class="source-line"><span>Условных позиций</span><b id="demo-position-count">0</b></div><div id="demo-positions" class="portfolio-list muted">Позиций пока нет</div><div class="source-line"><span>Последнее решение</span><b id="last-demo-decision">—</b></div><div class="source-line"><span>Реальных заявок</span><b id="real-order-count">0</b></div><hr><div class="source-line"><span>Реальный счёт · чтение</span><b id="broker-overview-status">Не подключён</b></div><div class="source-line"><span>Доступные рубли</span><b id="broker-overview-cash">—</b></div><div class="source-line"><span>Позиций на счёте</span><b id="broker-overview-positions">—</b></div></div></section>
             </div>
-            <section class="panel"><div class="panel-head"><h2>Сделки автора за 24 часа</h2><div class="trade-actions"><span class="tag" id="today-count">0 сделок</span><button class="button small" id="auto-copy-button" type="button">Включить автокопирование</button></div></div><div class="panel-body"><p class="subtle" id="copy-note">Повторение прошлой покупки требует нажатия в строке; новые сделки обрабатываются выбранным режимом.</p><p class="toast space-top" id="copy-message" role="status"></p></div><div id="today-list" class="empty">Сделки пока не загружены</div></section>
+            <section class="panel"><div class="panel-head"><h2 id="trades-heading">Сделки автора за 24 часа</h2><div class="trade-actions"><span class="tag" id="today-count">0 сделок</span><button class="button neutral small" id="month-button" type="button">Посмотреть за месяц</button><button class="button small" id="auto-copy-button" type="button">Включить автокопирование</button></div></div><div class="panel-body"><p class="subtle" id="copy-note">Повторение прошлой покупки требует нажатия в строке; новые сделки обрабатываются выбранным режимом.</p><p class="toast space-top" id="month-message" role="status"></p><p class="toast space-top" id="copy-message" role="status"></p></div><div id="today-list" class="empty">Сделки пока не загружены</div></section>
             <div class="details-grid">
               <section class="panel"><div class="panel-head"><h2>Инструменты профиля</h2><span class="tag" id="instrument-count">0 инструментов</span></div><div class="panel-body"><input class="search" id="instrument-search" type="search" placeholder="Поиск по тикеру или названию" aria-label="Поиск инструмента"></div><div id="instrument-list" class="empty">Данные появятся после входа</div><div class="panel-body"><button class="button neutral small" type="button" id="instrument-more" hidden>Показать ещё</button></div><div id="history-panel" hidden><div class="panel-head"><h2 id="history-title">История</h2><button type="button" class="link" id="history-close">Закрыть</button></div><div id="history-list" class="empty"></div><div class="panel-body"><button class="button neutral small" type="button" id="history-more" hidden>Показать ещё</button></div></div></section>
               <section class="panel"><div class="panel-head"><h2>Telegram-бот</h2><span class="tag">Уведомления</span></div><div class="panel-body"><div class="telegram-health"><i class="dot" id="telegram-dot"></i><strong id="telegram-state">Проверяем настройки</strong></div><div class="source-line"><span>Получатель</span><b id="telegram-recipient">—</b></div><div class="source-line"><span>Токен</span><b id="telegram-token-state">—</b></div><p class="muted space-top" id="telegram-note">Сообщения отправляются только на указанный ID.</p><button class="button neutral small space-top" id="telegram-test" type="button">Проверить отправку</button><p class="toast space-top" id="telegram-test-result" role="status"></p></div></section>
@@ -240,7 +240,7 @@
   </div>
   <script>
     const el = id => document.getElementById(id);
-    let instruments = [], today = [], events = [], realOrders = [], selected = null, historyCursor = null, tokenConfigured = false, authStatus = 'checking', authDismissed = false, instrumentLimit = 60, autoCopyEnabled = false, realMode = 'off', currentPreview = null;
+    let instruments = [], today = [], month = {status:'idle',items:[]}, monthView = false, events = [], realOrders = [], selected = null, historyCursor = null, tokenConfigured = false, authStatus = 'checking', authDismissed = false, instrumentLimit = 60, autoCopyEnabled = false, realMode = 'off', currentPreview = null;
     const tabs = [...document.querySelectorAll('[data-view]')];
     const pages = [...document.querySelectorAll('.view')];
     const names = {overview:'Обзор',settings:'Настройки',journal:'Журнал'};
@@ -300,17 +300,24 @@
       finally { setTimeout(() => button.disabled = false, 3000); }
     });
     function renderToday() {
-      const box=el('today-list'); box.replaceChildren(); el('today-count').textContent=today.length+' сделок';
-      if(!today.length){box.className='empty';box.textContent='За последние 24 часа опубликованных сделок не найдено';return;}
+      const box=el('today-list'); box.replaceChildren();
+      const items=monthView?(month.status==='ready'?month.items:[]):today;
+      el('trades-heading').textContent=monthView?'Сделки автора за 30 дней':'Сделки автора за 24 часа';
+      el('month-button').textContent=monthView?'Вернуться к 24 часам':'Посмотреть за месяц';
+      el('today-count').textContent=monthView&&month.status==='loading'?'Загрузка…':items.length+' сделок';
+      const monthMessage=el('month-message');monthMessage.className=month.status==='error'?'toast error space-top':'toast space-top';
+      monthMessage.textContent=monthView?(month.status==='loading'?month.message||'Читаем историю за 30 дней…':month.status==='error'?month.message||'История не загрузилась':month.status==='ready'?'Загружено за последние 30 дней · только сделки не старше 24 часов можно повторить':'Месячная история не загружена; вернись к 24 часам и открой её снова'):'';
+      if(!items.length){box.className='empty';box.textContent=monthView?(month.status==='ready'?'За последние 30 дней опубликованных сделок не найдено':month.status==='error'?'Загрузка не удалась. Вернись к 24 часам и нажми «Посмотреть за месяц» ещё раз.':'Загружаем сделки автора за 30 дней…'):'За последние 24 часа опубликованных сделок не найдено';return;}
       box.className='table-wrap';const table=document.createElement('table');
       const head=document.createElement('thead');head.innerHTML='<tr><th>Время</th><th>Инструмент</th><th>Действие</th><th>Цена</th><th>Операция</th></tr>';table.append(head);
       const body=document.createElement('tbody');
-      for(const item of today){
+      for(const item of items){
         const row=document.createElement('tr');
         for(const [label,value] of [['Время',fmtDate(item.tradeDateTime)],['Инструмент',item.name+' · '+item.ticker],['Действие',item.action==='buy'?'Покупка':'Продажа'],['Цена',String(item.price)+' '+(item.currency||'')]]){const cell=document.createElement('td');cell.dataset.label=label;cell.textContent=value;row.append(cell);}
-        const action=document.createElement('td');action.dataset.label='Повторить';
-        if(item.can_demo_buy){const button=document.createElement('button');button.type='button';button.className='button ghost small';const bought=events.some(event=>event.source_event_id===item.id&&event.trade==='ДЕМО: куплено');const sent=realOrders.some(order=>order.source_key==='historic:'+item.id);button.textContent=realMode!=='off'?(sent?'Заявка отправлена':'Подготовить заявку'):(bought?'Уже куплено':'Повторить покупку');button.disabled=realMode!=='off'?sent:bought;button.addEventListener('click',()=>realMode!=='off'?prepareReal(item.id):paperBuy(item.id,button));action.append(button);}
-        else action.textContent=item.action==='sell'?'—':item.asset_type==='future'?'Нет данных о ГО':'Недоступно';
+        const action=document.createElement('td');action.dataset.label='Действие';
+        const recent=Date.now()-new Date(item.tradeDateTime).getTime()<86400000;
+        if(item.can_demo_buy&&recent&&today.some(candidate=>candidate.id===item.id)){const button=document.createElement('button');button.type='button';button.className='button ghost small';const bought=events.some(event=>event.source_event_id===item.id&&event.trade==='ДЕМО: куплено');const sent=realOrders.some(order=>order.source_key==='historic:'+item.id);button.textContent=realMode!=='off'?(sent?'Заявка отправлена':'Подготовить заявку'):(bought?'Уже куплено':'Повторить покупку');button.disabled=realMode!=='off'?sent:bought;button.addEventListener('click',()=>realMode!=='off'?prepareReal(item.id):paperBuy(item.id,button));action.append(button);}
+        else action.textContent=monthView&&!recent?'Только просмотр':item.action==='sell'?'—':item.asset_type==='future'?'Нет данных о ГО':'Недоступно';
         row.append(action);body.append(row);
       }
       table.append(body);box.append(table);
@@ -421,7 +428,7 @@
       if(trading.status==='error')el('trade-message').textContent=trading.message;
     }
     function renderState(state){
-      renderAuth(state.auth);instruments=state.monitor.instruments||[];today=state.today||[];events=state.events||[];realOrders=state.real_orders||[];realMode=state.settings.real_mode||'off';
+      renderAuth(state.auth);instruments=state.monitor.instruments||[];today=state.today||[];month=state.month||{status:'idle',items:[]};events=state.events||[];realOrders=state.real_orders||[];realMode=state.settings.real_mode||'off';
       renderBroker(state);renderTrading(state);
       const profile=new URL(state.settings.profile_url).pathname.split('/').filter(Boolean).at(-1);
       el('profile-heading').textContent=profile+' · профиль Пульса';el('source-profile').textContent=profile;
@@ -486,6 +493,14 @@
     el('real-mode').addEventListener('change',()=>{if(el('real-mode').value!=='off'){el('auto-buy').checked=false;el('monitor-enabled').checked=true;}});
     el('auto-buy').addEventListener('change',()=>{if(el('auto-buy').checked)el('monitor-enabled').checked=true;});
     el('monitor-enabled').addEventListener('change',()=>{if(!el('monitor-enabled').checked)el('auto-buy').checked=false;});
+    el('month-button').addEventListener('click',async()=>{
+      if(monthView){monthView=false;renderToday();return;}
+      monthView=true;renderToday();
+      const button=el('month-button');button.disabled=true;
+      try{await api('/api/month',{});await refresh();}
+      catch(error){monthView=false;renderToday();el('copy-message').className='toast error space-top';el('copy-message').textContent=error.message;}
+      finally{button.disabled=false;}
+    });
     el('auto-copy-button').addEventListener('click',async()=>{
       const button=el('auto-copy-button'),message=el('copy-message');button.disabled=true;
       try{const result=await api('/api/auto-copy',{enabled:!autoCopyEnabled});el('auto-buy').checked=result.settings.auto_demo_buy;el('monitor-enabled').checked=result.settings.monitoring_enabled;message.className='toast space-top';message.textContent=result.settings.auto_demo_buy?'Автокопирование включено. Новые сделки будут обработаны условно.':'Автокопирование остановлено. Мониторинг остаётся включённым.';await refresh();}
