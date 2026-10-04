@@ -294,6 +294,40 @@ class LiveMonitorTests(unittest.TestCase):
         self.assertEqual(len(recent), 2)
         self.assertEqual([item["can_demo_buy"] for item in recent], [True, False])
 
+    def test_recent_bond_and_fund_buys_can_be_repeated_conditionally(self):
+        now = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat()
+
+        class HistoryBrowser:
+            def history(self, ticker, class_code, cursor=None):
+                return {"items": [{"tradeDateTime": now, "action": "buy", "averagePrice": 100,
+                                   "currency": "rub"}], "hasNext": False, "nextCursor": None}
+
+        instruments = [{"ticker": ticker, "classCode": code, "showName": ticker,
+                        "maxTradeDateTime": now} for ticker, code in
+                       [("BOND", "TQOB"), ("FUND", "TQTF"), ("FUT", "SPBFUT")]]
+        recent = demo_admin.recent_profile_trades(HistoryBrowser(), "LinMath", instruments)
+        by_ticker = {item["ticker"]: item["can_demo_buy"] for item in recent}
+        self.assertEqual(by_ticker, {"BOND": True, "FUND": True, "FUT": False})
+
+    def test_auto_copy_button_enables_monitoring_without_broker_order(self):
+        with tempfile.TemporaryDirectory() as folder, patch.object(demo_admin, "AUTH", {"status": "required"}), \
+                patch.object(demo_admin, "SETTINGS_PATH", Path(folder) / "settings.json"):
+            server = ThreadingHTTPServer(("127.0.0.1", 0), demo_admin.Handler)
+            worker = threading.Thread(target=server.serve_forever, daemon=True)
+            worker.start()
+            try:
+                request = Request(f"http://127.0.0.1:{server.server_port}/api/auto-copy",
+                                  data=b'{"enabled":true}', headers={"Content-Type": "application/json"})
+                with urlopen(request, timeout=2) as response:
+                    settings = json.load(response)["settings"]
+                self.assertTrue(settings["monitoring_enabled"])
+                self.assertTrue(settings["auto_demo_buy"])
+                self.assertTrue(demo_admin.load_settings()["auto_demo_buy"])
+            finally:
+                server.shutdown()
+                server.server_close()
+                worker.join(timeout=2)
+
 
 if __name__ == "__main__":
     unittest.main()

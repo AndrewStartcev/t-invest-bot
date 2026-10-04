@@ -167,6 +167,8 @@ def save_settings(data: dict) -> dict:
     auto_buy = data.get("auto_demo_buy")
     if type(enabled) is not bool or type(auto_buy) is not bool:
         raise ValueError("Некорректное значение режима")
+    if auto_buy and not enabled:
+        raise ValueError("Для автокопирования включи мониторинг")
     rules = validated_rules(data.get("rules", DEFAULT_RULES))
     if "telegram_token" in data:
         if not isinstance(data["telegram_token"], str):
@@ -251,7 +253,8 @@ def recent_profile_trades(browser: PulseBrowser, profile: str, instruments: list
                     "asset_type": asset_type(item.get("type", ""), item["classCode"]),
                     "action": trade.get("action"), "tradeDateTime": trade["tradeDateTime"],
                     "price": trade.get("averagePrice"), "currency": trade.get("currency"),
-                    "can_demo_buy": item["classCode"] == "TQBR" and trade.get("action") == "buy",
+                    "can_demo_buy": asset_type(item.get("type", ""), item["classCode"]) in {"stock", "bond", "fund"}
+                                    and trade.get("action") == "buy",
                 })
             cursor = page.get("nextCursor")
             if older or not page.get("hasNext") or cursor is None:
@@ -321,9 +324,9 @@ def poll_once(browser: PulseBrowser, settings: dict, *, emit_events: bool = True
             apply_demo(event, {"ticker": item["ticker"], "classCode": item["classCode"],
                                "name": item["showName"], "asset_type": asset_type(item.get("type", ""), item["classCode"]),
                                "side": side, "price": trade.get("averagePrice"), "currency": trade.get("currency"),
-                               "lot_size": 1 if asset_type(item.get("type", ""), item["classCode"]) == "stock" else None}, settings)
-            if event["asset_type"] == "stock":
-                event["assumption"] = "Условный лот 1 акция; реальный размер лота не проверен"
+                               "lot_size": 1 if asset_type(item.get("type", ""), item["classCode"]) in {"stock", "bond", "fund"} else None}, settings)
+            if event["asset_type"] in {"stock", "bond", "fund"}:
+                event["assumption"] = "Условный лот 1 единица; реальный размер лота не проверен"
         match = next((candidate for candidate in recent
                       if candidate["id"] not in matched_ids and candidate["ticker"] == item["ticker"]
                       and candidate["classCode"] == item["classCode"] and candidate["action"] == side
@@ -551,11 +554,20 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError("Нужен объект JSON")
             with LOCK:
                 authenticated = AUTH["status"] == "authenticated"
-            if not authenticated and self.path not in {"/api/auth/start", "/api/browser/show", "/api/auth/check", "/api/settings", "/api/demo", "/api/demo/scenario", "/api/demo/reset", "/api/telegram/test", "/api/broker/connect", "/api/broker/select", "/api/broker/refresh"}:
+            if not authenticated and self.path not in {"/api/auth/start", "/api/browser/show", "/api/auth/check", "/api/settings", "/api/auto-copy", "/api/demo", "/api/demo/scenario", "/api/demo/reset", "/api/telegram/test", "/api/broker/connect", "/api/broker/select", "/api/broker/refresh"}:
                 self.respond(403, {"error": "Сначала авторизуйся в Пульсе"})
                 return
             if self.path == "/api/settings":
                 self.respond(200, {"settings": save_settings(data)})
+            elif self.path == "/api/auto-copy":
+                enabled = data.get("enabled")
+                if type(enabled) is not bool:
+                    raise ValueError("Укажи состояние автокопирования")
+                settings = load_settings()
+                settings["auto_demo_buy"] = enabled
+                if enabled:
+                    settings["monitoring_enabled"] = True
+                self.respond(200, {"settings": save_settings(settings)})
             elif self.path == "/api/broker/connect":
                 candidate = data.get("token", "")
                 if not isinstance(candidate, str):
@@ -670,7 +682,7 @@ class Handler(BaseHTTPRequestHandler):
                                        "name": candidate["name"], "asset_type": candidate.get("asset_type") or "stock",
                                        "side": "buy", "price": candidate["price"], "currency": candidate["currency"],
                                        "lot_size": 1}, load_settings())
-                    event["assumption"] = "Условный лот 1 акция; реальный размер лота не проверен"
+                    event["assumption"] = "Условный лот 1 единица; реальный размер лота не проверен"
                     add_event(event)
                 settings = load_settings()
                 notify(event, settings, f"ДЕМО · {event['profile']} · {event['instrument']} · {event['trade']} по {event['price']}. {event['reason']}. Реальной заявки нет.")
