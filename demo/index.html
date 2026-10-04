@@ -159,6 +159,11 @@
       </div>
     </div>
   </div>
+  <div class="auth" id="order-confirm" role="dialog" aria-modal="true" aria-labelledby="order-title" hidden>
+    <div class="auth-card"><div class="auth-top"><div class="brand"><span class="brand-mark">T</span><span>Реальная заявка</span></div><button class="auth-close" type="button" id="order-close" aria-label="Закрыть подтверждение">×</button></div>
+      <div class="auth-body"><span class="eyebrow">Проверка перед отправкой</span><h1 id="order-title">Подтверди заявку</h1><p id="order-summary">Загружаем цену и лимиты…</p><div class="source-line"><span>Счёт</span><b id="order-account">—</b></div><div class="source-line"><span>Лоты</span><b id="order-quantity">—</b></div><div class="source-line"><span>Лимитная цена</span><b id="order-price">—</b></div><div class="source-line"><span>Оценка суммы / ГО</span><b id="order-amount">—</b></div><p class="muted space-top">Цена и доступное количество проверяются повторно при отправке. Исполнение заявки может быть частичным.</p><div class="form-actions"><button class="button" id="order-submit" type="button">Отправить реальную заявку</button><button class="button neutral" id="order-cancel" type="button">Отмена</button></div><p class="toast error space-top" id="order-message" role="status"></p></div>
+    </div>
+  </div>
   <div class="app" id="admin-app" inert>
     <aside class="sidebar">
       <div class="brand"><span class="brand-mark">T</span><span>T-Invest Bot</span></div>
@@ -171,14 +176,14 @@
       <div class="side-foot"><b>Локальная панель</b>Данные сеанса остаются на этом компьютере</div>
     </aside>
     <main class="main">
-        <div class="topbar"><span class="breadcrumb">Пульс / <b id="breadcrumb">Обзор</b></span><div class="top-right"><button class="button neutral small" type="button" id="connect-pulse">Подключить Пульс</button><span>Брокерские заявки отключены</span><span class="badge" id="mode-badge">Мониторинг выключен</span></div></div>
+        <div class="topbar"><span class="breadcrumb">Пульс / <b id="breadcrumb">Обзор</b></span><div class="top-right"><button class="button neutral small" type="button" id="connect-pulse">Подключить Пульс</button><span id="trade-top-status">Брокерские заявки отключены</span><span class="badge" id="mode-badge">Мониторинг выключен</span></div></div>
       <div class="content">
         <section class="view active" id="view-overview">
           <div class="page-head"><div><h1>Обзор</h1><p class="subtle" id="profile-heading">Профиль Пульса</p></div><div class="live-status"><i class="dot" id="source-dot"></i><span id="source-status">Подключение</span></div></div>
           <div class="cards">
             <div class="card"><span class="card-label">Покупки автора · 24 ч</span><strong id="source-buys">0</strong><small>Опубликованные сделки</small></div>
             <div class="card"><span class="card-label">Продажи автора · 24 ч</span><strong id="source-sells">0</strong><small>Опубликованные сделки</small></div>
-            <div class="card"><span class="card-label">Наши покупки · условно</span><strong id="our-buys">0</strong><small>Без реальных заявок</small></div>
+            <div class="card"><span class="card-label">Наши покупки · условно</span><strong id="our-buys">0</strong><small>Отдельный демо-портфель</small></div>
             <div class="card"><span class="card-label">Инструменты профиля</span><strong id="instrument-total">0</strong><small>Доступны для просмотра</small></div>
           </div>
           <div class="overview-flow">
@@ -190,9 +195,9 @@
                 <p class="muted space-top" id="source-message">Подключаемся к Пульсу…</p>
                 <button class="button neutral small space-top" id="refresh-source" type="button">Проверить данные</button>
               </div></section>
-              <section class="panel"><div class="panel-head"><h2>Наш результат</h2><span class="tag">Симуляция</span></div><div class="panel-body"><p class="subtle">Условный портфель для проверки правил. Реальный счёт показан отдельно ниже.</p><div class="source-line space-top"><span>Условных операций</span><b id="demo-total">0</b></div><div class="source-line"><span>Условных позиций</span><b id="demo-position-count">0</b></div><div id="demo-positions" class="portfolio-list muted">Позиций пока нет</div><div class="source-line"><span>Последнее решение</span><b id="last-demo-decision">—</b></div><div class="source-line"><span>Брокерские заявки</span><b>Не выставлялись</b></div><hr><div class="source-line"><span>Реальный счёт · чтение</span><b id="broker-overview-status">Не подключён</b></div><div class="source-line"><span>Доступные рубли</span><b id="broker-overview-cash">—</b></div><div class="source-line"><span>Позиций на счёте</span><b id="broker-overview-positions">—</b></div></div></section>
+              <section class="panel"><div class="panel-head"><h2>Наш результат</h2><span class="tag">Симуляция / брокер</span></div><div class="panel-body"><p class="subtle">Условный портфель и реальные заявки учитываются раздельно.</p><div class="source-line space-top"><span>Условных операций</span><b id="demo-total">0</b></div><div class="source-line"><span>Условных позиций</span><b id="demo-position-count">0</b></div><div id="demo-positions" class="portfolio-list muted">Позиций пока нет</div><div class="source-line"><span>Последнее решение</span><b id="last-demo-decision">—</b></div><div class="source-line"><span>Реальных заявок</span><b id="real-order-count">0</b></div><hr><div class="source-line"><span>Реальный счёт · чтение</span><b id="broker-overview-status">Не подключён</b></div><div class="source-line"><span>Доступные рубли</span><b id="broker-overview-cash">—</b></div><div class="source-line"><span>Позиций на счёте</span><b id="broker-overview-positions">—</b></div></div></section>
             </div>
-            <section class="panel"><div class="panel-head"><h2>Сделки автора за 24 часа</h2><div class="trade-actions"><span class="tag" id="today-count">0 сделок</span><button class="button small" id="auto-copy-button" type="button">Включить автокопирование</button></div></div><div class="panel-body"><p class="subtle" id="copy-note">Ручная и автоматическая покупка здесь условные. Заявки брокеру не отправляются.</p><p class="toast space-top" id="copy-message" role="status"></p></div><div id="today-list" class="empty">Сделки пока не загружены</div></section>
+            <section class="panel"><div class="panel-head"><h2>Сделки автора за 24 часа</h2><div class="trade-actions"><span class="tag" id="today-count">0 сделок</span><button class="button small" id="auto-copy-button" type="button">Включить автокопирование</button></div></div><div class="panel-body"><p class="subtle" id="copy-note">Повторение прошлой покупки требует нажатия в строке; новые сделки обрабатываются выбранным режимом.</p><p class="toast space-top" id="copy-message" role="status"></p></div><div id="today-list" class="empty">Сделки пока не загружены</div></section>
             <div class="details-grid">
               <section class="panel"><div class="panel-head"><h2>Инструменты профиля</h2><span class="tag" id="instrument-count">0 инструментов</span></div><div class="panel-body"><input class="search" id="instrument-search" type="search" placeholder="Поиск по тикеру или названию" aria-label="Поиск инструмента"></div><div id="instrument-list" class="empty">Данные появятся после входа</div><div class="panel-body"><button class="button neutral small" type="button" id="instrument-more" hidden>Показать ещё</button></div><div id="history-panel" hidden><div class="panel-head"><h2 id="history-title">История</h2><button type="button" class="link" id="history-close">Закрыть</button></div><div id="history-list" class="empty"></div><div class="panel-body"><button class="button neutral small" type="button" id="history-more" hidden>Показать ещё</button></div></div></section>
               <section class="panel"><div class="panel-head"><h2>Telegram-бот</h2><span class="tag">Уведомления</span></div><div class="panel-body"><div class="telegram-health"><i class="dot" id="telegram-dot"></i><strong id="telegram-state">Проверяем настройки</strong></div><div class="source-line"><span>Получатель</span><b id="telegram-recipient">—</b></div><div class="source-line"><span>Токен</span><b id="telegram-token-state">—</b></div><p class="muted space-top" id="telegram-note">Сообщения отправляются только на указанный ID.</p><button class="button neutral small space-top" id="telegram-test" type="button">Проверить отправку</button><p class="toast space-top" id="telegram-test-result" role="status"></p></div></section>
@@ -204,10 +209,10 @@
           <div class="settings-grid">
             <section class="panel"><div class="panel-head"><h2>Мониторинг</h2><span class="tag">Один профиль</span></div><form class="panel-body" id="settings-form">
               <div class="field"><label for="profile">Ссылка на профиль Пульса</label><input id="profile" type="url" required autocomplete="off"></div>
-              <label class="switch"><span><b>Мониторинг сделок Пульса</b><small>Читает новые сделки автора и показывает их в журнале. Заявки брокеру не отправляются.</small></span><input id="monitor-enabled" type="checkbox"></label>
+              <label class="switch"><span><b>Мониторинг сделок Пульса</b><small>Читает новые сделки автора и показывает их в журнале.</small></span><input id="monitor-enabled" type="checkbox"></label>
               <div class="field-row"><div class="field"><label for="interval">Интервал проверки, сек.</label><input id="interval" type="number" min="30" max="3600" required><small>От 30 до 3600 секунд</small></div><div class="field"><label for="chat">Telegram ID получателя</label><input id="chat" type="text" inputmode="numeric" autocomplete="off" placeholder="Не указан"><small>Пустой ID — сообщения не отправляются</small></div></div>
               <div class="field"><label for="token">Токен Telegram-бота</label><input id="token" type="password" autocomplete="new-password" placeholder="Не задан"><small id="token-hint">Хранится только локально; сохранённый токен не показывается</small></div>
-              <div class="field"><label>Лимиты условных покупок и продаж</label><small>Стартовые значения для показа. Суммы из видео клиента ещё требуют подтверждения.</small></div>
+              <div class="field"><label>Лимиты покупок и продаж</label><small>Для реальной торговли проверь суммы перед включением. Фактическая стоимость лота и ГО берутся из API брокера.</small></div>
               <div class="rule-grid">
                 <div class="rule-box"><h3>Акции</h3><div class="field"><label for="stock-budget">Бюджет покупки, ₽</label><input id="stock-budget" type="number" min="1" max="10000000" required></div><div class="field"><label for="stock-lot">Максимальная цена одного лота, ₽</label><input id="stock-lot" type="number" min="1" max="10000000" required></div><div class="field"><label for="stock-position">Лимит позиции, ₽</label><input id="stock-position" type="number" min="1" max="10000000" required></div></div>
                 <div class="rule-box"><h3>Облигации</h3><div class="field"><label for="bond-budget">Бюджет покупки, ₽</label><input id="bond-budget" type="number" min="1" max="10000000" required></div><div class="field"><label for="bond-lot">Максимальная цена одного лота, ₽</label><input id="bond-lot" type="number" min="1" max="10000000" required></div><div class="field"><label for="bond-position">Лимит позиции, ₽</label><input id="bond-position" type="number" min="1" max="10000000" required></div></div>
@@ -215,17 +220,19 @@
                 <div class="rule-box"><h3>Фьючерсы</h3><div class="field"><label for="future-margin">Лимит обеспечения, ₽</label><input id="future-margin" type="number" min="1" max="10000000" required></div><div class="field"><label for="future-contracts">Максимум контрактов</label><input id="future-contracts" type="number" min="1" max="100" required></div><div class="field"><label for="sell-percent">Продажа своей позиции, %</label><input id="sell-percent" type="number" min="1" max="100" required></div></div>
               </div>
               <label class="switch"><span><b>Автоматически повторять сделки · симуляция</b><small>Новые покупки и продажи проходят через лимиты. Продажа без своей условной позиции пропускается. Для акций, облигаций и фондов лот условно равен 1.</small></span><input id="auto-buy" type="checkbox"></label>
+              <div class="field"><label for="real-mode">Реальная торговля</label><select id="real-mode"><option value="off">Выключена</option><option value="confirm">Подтверждать каждую заявку</option><option value="auto">Автоматически по лимитам</option></select><small>Нужен отдельный торговый токен и выбранный счёт. При реальной торговле симуляция выключается. Выключение режима не отменяет уже выставленные заявки.</small></div>
               <label class="switch"><span><b>Пауза уведомлений</b><small>Сигналы остаются в журнале</small></span><input id="paused" type="checkbox"></label>
               <div class="form-actions"><button class="button" type="submit">Сохранить настройки</button><button class="button neutral" id="open-pulse" type="button">Открыть окно Пульса</button><span class="toast" id="settings-message" role="status"></span></div>
             </form></section>
             <div class="stack">
-              <section class="panel"><div class="panel-head"><h2>Брокерский счёт</h2><span class="tag">Только чтение</span></div><div class="panel-body"><p class="subtle">Подключи токен T-Invest с правом «только чтение». Он остаётся на этом компьютере. Реальные заявки отключены.</p><div class="field space-top"><label for="broker-token">Токен T-Invest</label><input id="broker-token" type="password" autocomplete="new-password" placeholder="Вставь токен только для чтения"><small id="broker-token-hint">Сохранённый токен здесь не отображается</small></div><div class="form-actions"><button class="button" id="broker-connect" type="button">Подключить</button><button class="button neutral" id="broker-refresh" type="button">Обновить счёт</button></div><div class="field space-top"><label for="broker-account">Счёт</label><select id="broker-account"></select></div><p class="toast space-top" id="broker-message" role="status"></p><div class="source-line"><span>Доступные рубли</span><b id="broker-cash">—</b></div><div class="source-line"><span>Стоимость портфеля</span><b id="broker-total">—</b></div><div class="source-line"><span>Позиции</span><b id="broker-position-count">—</b></div><div id="broker-positions" class="portfolio-list muted">Подключи счёт, чтобы увидеть позиции</div><small id="broker-updated">—</small></div></section>
-              <section class="panel"><div class="panel-head"><h2>Статус подключения</h2></div><div class="panel-body"><div class="source-line"><span>Пульс</span><b id="auth-summary">—</b></div><div class="source-line"><span>Telegram-бот</span><b id="bot-summary">—</b></div><div class="source-line"><span>Брокерский счёт</span><b id="broker-summary">Не подключён</b></div></div></section>
+              <section class="panel"><div class="panel-head"><h2>Брокерский счёт</h2><span class="tag">Только чтение</span></div><div class="panel-body"><p class="subtle">Этот токен читает остаток и позиции. Для выставления заявок нужен отдельный торговый токен ниже.</p><div class="field space-top"><label for="broker-token">Токен T-Invest</label><input id="broker-token" type="password" autocomplete="new-password" placeholder="Вставь токен только для чтения"><small id="broker-token-hint">Сохранённый токен здесь не отображается</small></div><div class="form-actions"><button class="button" id="broker-connect" type="button">Подключить</button><button class="button neutral" id="broker-refresh" type="button">Обновить счёт</button></div><div class="field space-top"><label for="broker-account">Счёт</label><select id="broker-account"></select></div><p class="toast space-top" id="broker-message" role="status"></p><div class="source-line"><span>Доступные рубли</span><b id="broker-cash">—</b></div><div class="source-line"><span>Стоимость портфеля</span><b id="broker-total">—</b></div><div class="source-line"><span>Позиции</span><b id="broker-position-count">—</b></div><div id="broker-positions" class="portfolio-list muted">Подключи счёт, чтобы увидеть позиции</div><small id="broker-updated">—</small></div></section>
+              <section class="panel"><div class="panel-head"><h2>Реальные заявки</h2><span class="tag">T-Invest API</span></div><div class="panel-body"><p class="subtle">Подключи отдельный токен с полным доступом. Он хранится локально и не показывается повторно. Торговля включается выбором режима и сохранением настроек.</p><div class="field space-top"><label for="trade-token">Торговый токен</label><input id="trade-token" type="password" autocomplete="new-password" placeholder="Токен с полным доступом"><small id="trade-token-hint">Не задан</small></div><div class="form-actions"><button class="button neutral" id="trade-connect" type="button">Проверить токен</button><button class="button neutral" id="trade-reconcile" type="button">Сверить заявки</button></div><div class="field space-top"><label for="trade-account">Торговый счёт</label><select id="trade-account"></select></div><p class="toast space-top" id="trade-message" role="status"></p><div class="source-line"><span>Подключение</span><b id="trade-connection">Не подключено</b></div><div class="source-line"><span>Режим</span><b id="trade-mode-status">Выключена</b></div></div></section>
+              <section class="panel"><div class="panel-head"><h2>Статус подключения</h2></div><div class="panel-body"><div class="source-line"><span>Пульс</span><b id="auth-summary">—</b></div><div class="source-line"><span>Telegram-бот</span><b id="bot-summary">—</b></div><div class="source-line"><span>Брокерский счёт</span><b id="broker-summary">Не подключён</b></div><div class="source-line"><span>Торговый доступ</span><b id="trade-summary">Не подключён</b></div></div></section>
             </div>
           </div>
         </section>
         <section class="view" id="view-journal">
-          <div class="page-head"><div><h1>Журнал</h1><p class="subtle">Сигналы, уведомления и условные результаты</p></div><span class="tag" id="event-count">0 событий</span></div>
+          <div class="page-head"><div><h1>Журнал</h1><p class="subtle">Сигналы, уведомления и статусы заявок</p></div><span class="tag" id="event-count">0 событий</span></div>
           <section class="panel"><div id="events" class="empty">Событий пока нет</div></section>
         </section>
       </div>
@@ -233,7 +240,7 @@
   </div>
   <script>
     const el = id => document.getElementById(id);
-    let instruments = [], today = [], events = [], selected = null, historyCursor = null, tokenConfigured = false, authStatus = 'checking', authDismissed = false, instrumentLimit = 60, autoCopyEnabled = false;
+    let instruments = [], today = [], events = [], realOrders = [], selected = null, historyCursor = null, tokenConfigured = false, authStatus = 'checking', authDismissed = false, instrumentLimit = 60, autoCopyEnabled = false, realMode = 'off', currentPreview = null;
     const tabs = [...document.querySelectorAll('[data-view]')];
     const pages = [...document.querySelectorAll('.view')];
     const names = {overview:'Обзор',settings:'Настройки',journal:'Журнал'};
@@ -296,13 +303,13 @@
       const box=el('today-list'); box.replaceChildren(); el('today-count').textContent=today.length+' сделок';
       if(!today.length){box.className='empty';box.textContent='За последние 24 часа опубликованных сделок не найдено';return;}
       box.className='table-wrap';const table=document.createElement('table');
-      const head=document.createElement('thead');head.innerHTML='<tr><th>Время</th><th>Инструмент</th><th>Действие</th><th>Цена</th><th>Условная покупка</th></tr>';table.append(head);
+      const head=document.createElement('thead');head.innerHTML='<tr><th>Время</th><th>Инструмент</th><th>Действие</th><th>Цена</th><th>Операция</th></tr>';table.append(head);
       const body=document.createElement('tbody');
       for(const item of today){
         const row=document.createElement('tr');
         for(const [label,value] of [['Время',fmtDate(item.tradeDateTime)],['Инструмент',item.name+' · '+item.ticker],['Действие',item.action==='buy'?'Покупка':'Продажа'],['Цена',String(item.price)+' '+(item.currency||'')]]){const cell=document.createElement('td');cell.dataset.label=label;cell.textContent=value;row.append(cell);}
         const action=document.createElement('td');action.dataset.label='Повторить';
-        if(item.can_demo_buy){const button=document.createElement('button');button.type='button';button.className='button ghost small';const bought=events.some(event=>event.source_event_id===item.id&&event.trade==='ДЕМО: куплено');button.textContent=bought?'Уже куплено':'Повторить покупку';button.disabled=bought;button.addEventListener('click',()=>paperBuy(item.id,button));action.append(button);}
+        if(item.can_demo_buy){const button=document.createElement('button');button.type='button';button.className='button ghost small';const bought=events.some(event=>event.source_event_id===item.id&&event.trade==='ДЕМО: куплено');const sent=realOrders.some(order=>order.source_key==='historic:'+item.id);button.textContent=realMode!=='off'?(sent?'Заявка отправлена':'Подготовить заявку'):(bought?'Уже куплено':'Повторить покупку');button.disabled=realMode!=='off'?sent:bought;button.addEventListener('click',()=>realMode!=='off'?prepareReal(item.id):paperBuy(item.id,button));action.append(button);}
         else action.textContent=item.action==='sell'?'—':item.asset_type==='future'?'Нет данных о ГО':'Недоступно';
         row.append(action);body.append(row);
       }
@@ -314,6 +321,29 @@
       catch(error){message.className='toast error space-top';message.textContent=error.message;}
       finally{button.disabled=false;}
     }
+    async function prepareReal(sourceId){
+      const message=el('copy-message');message.className='toast space-top';message.textContent='Проверяем цену, деньги и лимиты брокера…';
+      try{
+        const response=await api('/api/trade/preview',{source_id:sourceId});currentPreview=response.preview.id;
+        const plan=response.preview.plan;
+        el('order-title').textContent=(plan.side==='buy'?'Покупка':'Продажа')+' · '+plan.ticker;
+        el('order-summary').textContent='Это реальная лимитная заявка через T-Invest API. Проверь данные перед отправкой.';
+        el('order-account').textContent='•••• '+plan.account_id.slice(-4);
+        el('order-quantity').textContent=plan.quantity+' лот(ов) · по '+plan.lot_size+' ед.';
+        el('order-price').textContent=plan.price+(plan.price_type==='PRICE_TYPE_POINT'?' пунктов':' ₽');
+        el('order-amount').textContent=plan.estimated_rub?plan.estimated_rub+' ₽':'Продажа своей позиции';
+        el('order-message').textContent='';el('order-confirm').hidden=false;message.textContent='Заявка подготовлена; подтверди её в открытом окне.';
+      }catch(error){message.className='toast error space-top';message.textContent=error.message;await refresh();}
+    }
+    function closeOrder(){el('order-confirm').hidden=true;currentPreview=null;}
+    el('order-close').addEventListener('click',closeOrder);
+    el('order-cancel').addEventListener('click',closeOrder);
+    el('order-submit').addEventListener('click',async()=>{
+      const button=el('order-submit');button.disabled=true;
+      try{await api('/api/trade/submit',{preview_id:currentPreview});closeOrder();el('copy-message').className='toast space-top';el('copy-message').textContent='Реальная заявка отправлена брокеру; проверяем исполнение.';await refresh();}
+      catch(error){el('order-message').textContent=error.message;await refresh();}
+      finally{button.disabled=false;}
+    });
     function renderInstruments() {
       const box=el('instrument-list');box.replaceChildren();el('instrument-count').textContent=instruments.length+' инструментов';
       const query=el('instrument-search').value.trim().toLocaleLowerCase('ru');
@@ -344,8 +374,8 @@
     function renderEvents(){
       const box=el('events');box.replaceChildren();el('event-count').textContent=events.length+' событий';
       if(!events.length){box.className='empty';box.textContent='Событий пока нет';return;}box.className='table-wrap';
-      const table=document.createElement('table'),head=document.createElement('thead');head.innerHTML='<tr><th>Обнаружено</th><th>Сигнал</th><th>Профиль</th><th>Результат</th><th>Объём демо</th><th>Причина</th><th>Telegram</th></tr>';table.append(head);table.style.minWidth='1000px';const body=document.createElement('tbody');
-      for(const item of events){const row=document.createElement('tr');const volume=item.quantity?item.quantity+' лот/контр. · '+item.amount_rub+' ₽':'—';const values=[fmtDate(item.time),item.instrument+' · '+item.price,item.profile,item.trade,volume,item.reason||'—',item.notification||'—'];for(const value of values){const cell=document.createElement('td');cell.textContent=value;row.append(cell);}body.append(row);}table.append(body);box.append(table);
+      const table=document.createElement('table'),head=document.createElement('thead');head.innerHTML='<tr><th>Обнаружено</th><th>Сигнал</th><th>Профиль</th><th>Результат</th><th>Объём</th><th>Причина</th><th>Telegram</th><th>Действие</th></tr>';table.append(head);table.style.minWidth='1100px';const body=document.createElement('tbody');
+      for(const item of events){const row=document.createElement('tr');const volume=item.quantity?item.quantity+' лот/контр. · '+(item.amount_rub||'—')+' ₽':'—';const values=[fmtDate(item.time),item.instrument+' · '+item.price,item.profile,item.trade,volume,item.reason||'—',item.notification||'—'];for(const value of values){const cell=document.createElement('td');cell.textContent=value;row.append(cell);}const action=document.createElement('td');if(item.real_status==='awaiting_approval'&&realMode==='confirm'){const button=document.createElement('button');button.type='button';button.className='button ghost small';button.textContent='Подготовить заявку';button.addEventListener('click',()=>prepareReal(item.source_key));action.append(button);}row.append(action);body.append(row);}table.append(body);box.append(table);
     }
     function ruleValues(){
       const rules={};
@@ -379,17 +409,30 @@
       for(const item of snapshot?.positions||[]){const row=document.createElement('div');row.className='source-line';const name=document.createElement('span'),value=document.createElement('b');name.textContent=item.ticker+(item.class_code?' · '+item.class_code:'');value.textContent=item.available+(item.blocked?' + '+item.blocked+' заблокировано':'');row.append(name,value);list.append(row);}
       if(broker.status==='error')el('broker-message').textContent=broker.message;
     }
+    function renderTrading(state){
+      const trading=state.trading||{},account=trading.accounts?.find(item=>item.id===trading.selected_account_id);
+      const selector=el('trade-account');selector.replaceChildren();
+      for(const item of trading.accounts||[]){const option=document.createElement('option');option.value=item.id;option.textContent=item.name+' · '+item.id.slice(-4);selector.append(option);}
+      selector.value=trading.selected_account_id||'';selector.disabled=!trading.accounts?.length;
+      const label=trading.status==='connected'?(account?.name||'Подключён'):trading.status==='error'?'Ошибка':'Не подключён';
+      el('trade-connection').textContent=el('trade-summary').textContent=label;
+      el('trade-token-hint').textContent=state.trade_token_configured?'Токен сохранён локально; введи новый, чтобы заменить':'Токен не задан';
+      el('trade-mode-status').textContent=state.settings.real_mode==='auto'?'Автоматически':state.settings.real_mode==='confirm'?'С подтверждением':'Выключена';
+      if(trading.status==='error')el('trade-message').textContent=trading.message;
+    }
     function renderState(state){
-      renderAuth(state.auth);instruments=state.monitor.instruments||[];today=state.today||[];events=state.events||[];
-      renderBroker(state);
+      renderAuth(state.auth);instruments=state.monitor.instruments||[];today=state.today||[];events=state.events||[];realOrders=state.real_orders||[];realMode=state.settings.real_mode||'off';
+      renderBroker(state);renderTrading(state);
       const profile=new URL(state.settings.profile_url).pathname.split('/').filter(Boolean).at(-1);
       el('profile-heading').textContent=profile+' · профиль Пульса';el('source-profile').textContent=profile;
-      el('source-mode').textContent=state.settings.monitoring_enabled?'Мониторинг включён':'Мониторинг выключен';
-      el('mode-badge').textContent=state.settings.monitoring_enabled?'Мониторинг включён':'Мониторинг выключен';
+      el('source-mode').textContent=realMode==='off'?(state.settings.monitoring_enabled?'Мониторинг включён':'Мониторинг выключен'):'Реальная торговля · '+(realMode==='auto'?'авто':'подтверждение');
+      el('mode-badge').textContent=realMode==='off'?(state.settings.monitoring_enabled?'Мониторинг включён':'Мониторинг выключен'):'Реальные заявки · '+(realMode==='auto'?'авто':'подтверждение');
+      el('trade-top-status').textContent=realMode==='off'?'Брокерские заявки отключены':'Реальная торговля включена';
       autoCopyEnabled=state.settings.auto_demo_buy;
       el('auto-copy-button').textContent=autoCopyEnabled?'Остановить автокопирование':'Включить автокопирование';
       el('auto-copy-button').className=autoCopyEnabled?'button neutral small':'button small';
-      el('copy-note').textContent=autoCopyEnabled?'Новые покупки и продажи повторяются условно по лимитам. Кнопки в строках позволяют обработать ранее опубликованные покупки за 24 часа. Реальных заявок нет.':'Кнопки в строках условно повторяют покупки за 24 часа. Автокопирование новых сделок выключено. Реальных заявок нет.';
+      el('auto-copy-button').hidden=realMode!=='off';
+      el('copy-note').textContent=realMode==='auto'?'Новые сделки проверяются по лимитам и отправляются брокеру лимитными заявками. Для прошлых покупок подготовь заявку кнопкой в строке.':realMode==='confirm'?'Новые сделки ожидают подтверждения в журнале. Для прошлых покупок подготовь заявку кнопкой в строке.':autoCopyEnabled?'Новые покупки и продажи повторяются условно по лимитам. Кнопки в строках позволяют обработать ранее опубликованные покупки за 24 часа. Реальных заявок нет.':'Кнопки в строках условно повторяют покупки за 24 часа. Автокопирование новых сделок выключено. Реальных заявок нет.';
       el('source-status').textContent=state.auth.status!=='authenticated'?'Пульс не подключён':state.monitor.status==='error'?'Нужна проверка':state.settings.monitoring_enabled?'Мониторинг включён':'Мониторинг выключен';
       el('source-dot').className='dot'+(state.auth.status!=='authenticated'||state.monitor.status==='error'?' bad':state.monitor.status==='running'?' good':'');
       el('last-check').textContent=state.monitor.last_check?fmtDate(state.monitor.last_check):'—';
@@ -397,6 +440,7 @@
       const buys=today.filter(item=>item.action==='buy').length,sells=today.filter(item=>item.action==='sell').length;
       const demos=events.filter(item=>item.trade==='ДЕМО: куплено'||item.trade==='ДЕМО: продано');
       el('source-buys').textContent=buys;el('source-sells').textContent=sells;el('our-buys').textContent=demos.filter(item=>item.side==='buy').length;el('demo-total').textContent=demos.length;
+      el('real-order-count').textContent=state.real_order_count||0;
       const lastDecision=events.find(item=>item.demo_status);
       el('last-demo-decision').textContent=lastDecision?lastDecision.instrument+' · '+lastDecision.trade.replace('ДЕМО: ',''):'—';
       const positions=Object.values(state.demo_positions||{}).filter(item=>item.quantity>0),portfolio=el('demo-positions');
@@ -421,9 +465,10 @@
     async function load(){
       const state=await api('/api/state');
       el('profile').value=state.settings.profile_url;el('interval').value=state.settings.poll_seconds;el('chat').value=state.settings.chat_id;
-      el('paused').checked=state.settings.paused;el('auto-buy').checked=state.settings.auto_demo_buy;el('monitor-enabled').checked=state.settings.monitoring_enabled;fillRules(state.settings.rules);
+      el('paused').checked=state.settings.paused;el('auto-buy').checked=state.settings.auto_demo_buy;el('monitor-enabled').checked=state.settings.monitoring_enabled;el('real-mode').value=state.settings.real_mode||'off';fillRules(state.settings.rules);
       renderState(state);
       if(state.broker_token_configured&&state.broker.status==='disconnected')api('/api/broker/refresh',{}).then(refresh).catch(error=>el('broker-message').textContent=error.message);
+      if(state.trade_token_configured&&state.trading.status==='disconnected')api('/api/trade/connect',{}).then(refresh).catch(error=>el('trade-message').textContent=error.message);
     }
     async function brokerAction(path,payload,button){
       const message=el('broker-message');button.disabled=true;message.className='toast space-top';message.textContent='Подключаемся к T-Invest…';
@@ -434,6 +479,11 @@
     el('broker-connect').addEventListener('click',()=>brokerAction('/api/broker/connect',{token:el('broker-token').value},el('broker-connect')));
     el('broker-refresh').addEventListener('click',()=>brokerAction('/api/broker/refresh',{},el('broker-refresh')));
     el('broker-account').addEventListener('change',()=>brokerAction('/api/broker/select',{account_id:el('broker-account').value},el('broker-account')));
+    async function tradeAction(path,payload,button){const message=el('trade-message');button.disabled=true;message.className='toast space-top';message.textContent='Проверяем T-Invest…';try{await api(path,payload);el('trade-token').value='';message.textContent='Торговый доступ проверен';await refresh();}catch(error){message.className='toast error space-top';message.textContent=error.message;}finally{button.disabled=false;}}
+    el('trade-connect').addEventListener('click',()=>tradeAction('/api/trade/connect',{token:el('trade-token').value},el('trade-connect')));
+    el('trade-account').addEventListener('change',()=>tradeAction('/api/trade/select',{account_id:el('trade-account').value},el('trade-account')));
+    el('trade-reconcile').addEventListener('click',()=>tradeAction('/api/trade/reconcile',{},el('trade-reconcile')));
+    el('real-mode').addEventListener('change',()=>{if(el('real-mode').value!=='off'){el('auto-buy').checked=false;el('monitor-enabled').checked=true;}});
     el('auto-buy').addEventListener('change',()=>{if(el('auto-buy').checked)el('monitor-enabled').checked=true;});
     el('monitor-enabled').addEventListener('change',()=>{if(!el('monitor-enabled').checked)el('auto-buy').checked=false;});
     el('auto-copy-button').addEventListener('click',async()=>{
@@ -444,7 +494,7 @@
     });
     el('settings-form').addEventListener('submit',async event=>{
       event.preventDefault();const message=el('settings-message');
-      try{await api('/api/settings',{profile_url:el('profile').value,poll_seconds:Number(el('interval').value),chat_id:el('chat').value,telegram_token:el('token').value,paused:el('paused').checked,monitoring_enabled:el('monitor-enabled').checked,auto_demo_buy:el('auto-buy').checked,rules:ruleValues()});
+      try{await api('/api/settings',{profile_url:el('profile').value,poll_seconds:Number(el('interval').value),chat_id:el('chat').value,telegram_token:el('token').value,paused:el('paused').checked,monitoring_enabled:el('monitor-enabled').checked,auto_demo_buy:el('auto-buy').checked,real_mode:el('real-mode').value,rules:ruleValues()});
         el('token').value='';message.className='toast';message.textContent='Настройки сохранены';await refresh();
       }catch(error){message.className='toast error';message.textContent=error.message;}
     });
