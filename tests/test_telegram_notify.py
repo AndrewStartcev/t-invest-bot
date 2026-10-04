@@ -2,7 +2,7 @@ import io
 import json
 import unittest
 
-from telegram_notify import send_notification
+from telegram_notify import NotificationError, send_notification
 
 
 class FakeResponse(io.BytesIO):
@@ -38,6 +38,13 @@ class TelegramNotificationTests(unittest.TestCase):
         self.assertEqual(send_notification("fake-token", "12345", "DEMO", opener=opener), "sent")
         self.assertEqual(captured["body"], {"chat_id": 12345, "text": "DEMO"})
         self.assertEqual(captured["timeout"], 10)
+
+    def test_delivery_failure_is_reported_without_crashing_monitor(self):
+        def timeout(*_args, **_kwargs):
+            raise TimeoutError()
+
+        with self.assertRaises(NotificationError):
+            send_notification("fake-token", "12345", "DEMO", opener=timeout)
 
 
 if __name__ == "__main__":

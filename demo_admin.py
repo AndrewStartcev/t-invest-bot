@@ -15,6 +15,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
 
+from demo_engine import DEFAULT_RULES, asset_type, simulate, validated_rules
 from telegram_notify import NotificationError, send_notification
 from pulse_live import PulseBrowser, PulseError, operations_url
 from pulse_replay import write_state
@@ -24,6 +25,7 @@ ROOT = Path(__file__).resolve().parent
 SETTINGS_PATH = ROOT / ".local" / "demo-settings.json"
 STATE_PATH = ROOT / ".local" / "pulse-live-state.json"
 EVENTS_PATH = ROOT / ".local" / "events.json"
+POSITIONS_PATH = ROOT / ".local" / "demo-positions.json"
 TOKEN_PATH = ROOT / ".local" / "telegram-token.txt"
 DEFAULTS = {
     "profile_url": "https://www.tbank.ru/invest/social/profile/LinMath/",
@@ -32,13 +34,33 @@ DEFAULTS = {
     "paused": False,
     "monitoring_enabled": False,
     "auto_demo_buy": False,
+    "rules": DEFAULT_RULES,
 }
 EVENTS: list[dict] = json.loads(EVENTS_PATH.read_text(encoding="utf-8")) if EVENTS_PATH.exists() else []
+POSITIONS: dict = json.loads(POSITIONS_PATH.read_text(encoding="utf-8")) if POSITIONS_PATH.exists() else {}
 LOCK = threading.RLock()
 HISTORY_REQUESTS = queue.Queue()
 MONITOR = {"status": "stopped", "message": "Мониторинг выключен", "last_check": None, "instrument_count": 0, "instruments": []}
 AUTH = {"status": "checking", "message": "Проверяем сохранённый вход в Пульс"}
 TODAY: list[dict] = []
+SCENARIOS = {
+    "stock_buy": {"ticker": "DEMO-R", "classCode": "TQBR", "name": "Демо · акция", "asset_type": "stock",
+                  "side": "buy", "price": 500, "lot_size": 1, "currency": "rub"},
+    "stock_sell": {"ticker": "DEMO-R", "classCode": "TQBR", "name": "Демо · акция", "asset_type": "stock",
+                   "side": "sell", "price": 530, "lot_size": 1, "currency": "rub"},
+    "expensive_stock": {"ticker": "DEMO-H", "classCode": "TQBR", "name": "Демо · дорогая акция", "asset_type": "stock",
+                        "side": "buy", "price": 8000, "lot_size": 1, "currency": "rub"},
+    "bond_buy": {"ticker": "DEMO-B", "classCode": "TQOB", "name": "Демо · облигация", "asset_type": "bond",
+                 "side": "buy", "price": 1000, "lot_size": 1, "currency": "rub"},
+    "fund_buy": {"ticker": "DEMO-ETF", "classCode": "TQTF", "name": "Демо · фонд", "asset_type": "fund",
+                 "side": "buy", "price": 250, "lot_size": 1, "currency": "rub"},
+    "future_buy": {"ticker": "DEMO-F", "classCode": "SPBFUT", "name": "Демо · фьючерс", "asset_type": "future",
+                   "side": "buy", "margin_rub": 9000, "currency": "rub"},
+    "future_sell": {"ticker": "DEMO-F", "classCode": "SPBFUT", "name": "Демо · фьючерс", "asset_type": "future",
+                    "side": "sell", "margin_rub": 9000, "currency": "rub"},
+    "future_over_limit": {"ticker": "DEMO-X", "classCode": "SPBFUT", "name": "Демо · фьючерс 27 000 ₽",
+                          "asset_type": "future", "side": "buy", "margin_rub": 27000, "currency": "rub"},
+}
 
 
 def telegram_token() -> str:
@@ -59,9 +81,11 @@ def save_telegram_token(value: str) -> None:
 
 def load_settings() -> dict:
     if not SETTINGS_PATH.exists():
-        return DEFAULTS.copy()
+        return json.loads(json.dumps(DEFAULTS))
     data = json.loads(SETTINGS_PATH.read_text(encoding="utf-8"))
-    return {**DEFAULTS, **{key: data[key] for key in DEFAULTS if key in data}}
+    settings = {**DEFAULTS, **{key: data[key] for key in DEFAULTS if key in data}}
+    settings["rules"] = validated_rules(settings["rules"])
+    return settings
 
 
 def save_settings(data: dict) -> dict:
@@ -73,7 +97,7 @@ def save_settings(data: dict) -> dict:
     if type(seconds) is not int or not 30 <= seconds <= 3600:
         raise ValueError("Интервал должен быть от 30 до 3600 секунд")
     chat_id = str(data.get("chat_id", "")).strip()
-    if chat_id and (not chat_id.isascii() or not chat_id.isdecimal() or chat_id.startswith("0")):
+    if chat_id and (len(chat_id) > 20 or not chat_id.isascii() or not chat_id.isdecimal() or chat_id.startswith("0")):
         raise ValueError("Telegram ID должен быть положительным числом")
     paused = data.get("paused")
     if type(paused) is not bool:
@@ -83,12 +107,13 @@ def save_settings(data: dict) -> dict:
     auto_buy = data.get("auto_demo_buy")
     if type(enabled) is not bool or type(auto_buy) is not bool:
         raise ValueError("Некорректное значение режима")
+    rules = validated_rules(data.get("rules", DEFAULT_RULES))
     if "telegram_token" in data:
         if not isinstance(data["telegram_token"], str):
             raise ValueError("Некорректный токен Telegram")
         save_telegram_token(data["telegram_token"])
     settings = {"profile_url": url, "poll_seconds": seconds, "chat_id": chat_id, "paused": paused,
-                "monitoring_enabled": enabled, "auto_demo_buy": auto_buy}
+                "monitoring_enabled": enabled, "auto_demo_buy": auto_buy, "rules": rules}
     SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
     temp = SETTINGS_PATH.with_suffix(".tmp")
     temp.write_text(json.dumps(settings, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -101,6 +126,21 @@ def add_event(event: dict) -> None:
         EVENTS.insert(0, event)
         del EVENTS[200:]
         write_state(EVENTS_PATH, EVENTS)
+
+
+def apply_demo(event: dict, signal: dict, settings: dict) -> None:
+    """Apply a paper decision and persist its own portfolio. No broker calls."""
+    with LOCK:
+        result, positions = simulate(signal, settings.get("rules", DEFAULT_RULES), POSITIONS)
+        if result["status"] == "executed":
+            write_state(POSITIONS_PATH, positions)
+            POSITIONS.clear()
+            POSITIONS.update(positions)
+        event.update(demo_status=result["status"], reason=result["reason"],
+                     quantity=result["quantity"], amount_rub=result["amount_rub"],
+                     asset_type=result["asset_type"])
+        event["trade"] = ("ДЕМО: куплено" if signal["side"] == "buy" else "ДЕМО: продано") \
+            if result["status"] == "executed" else "ДЕМО: пропущено"
 
 
 def notify(event: dict, settings: dict, message: str) -> None:
@@ -148,6 +188,7 @@ def recent_profile_trades(browser: PulseBrowser, profile: str, instruments: list
                 found.append({
                     "id": hashlib.sha256(identity.encode()).hexdigest()[:24], "profile": profile,
                     "ticker": item["ticker"], "classCode": item["classCode"], "name": item["showName"],
+                    "asset_type": asset_type(item.get("type", ""), item["classCode"]),
                     "action": trade.get("action"), "tradeDateTime": trade["tradeDateTime"],
                     "price": trade.get("averagePrice"), "currency": trade.get("currency"),
                     "can_demo_buy": item["classCode"] == "TQBR" and trade.get("action") == "buy",
@@ -209,14 +250,20 @@ def poll_once(browser: PulseBrowser, settings: dict, *, emit_events: bool = True
     matched_ids = set()
     for item, trade in sorted(fresh, key=lambda pair: pair[1]["tradeDateTime"]):
         side = trade["action"]
-        simulated = side == "buy" and settings["auto_demo_buy"]
         event = {
             "time": datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds"),
             "trade_time": trade["tradeDateTime"], "profile": profile,
             "instrument": item["ticker"], "instrument_name": item["showName"],
             "side": side, "price": f"{trade.get('averagePrice', '—')} {trade.get('currency', '')}",
-            "source": "pulse", "trade": "ДЕМО: куплено" if simulated else "не выставлялась",
+            "source": "pulse", "trade": "не выставлялась",
         }
+        if settings.get("auto_demo_buy"):
+            apply_demo(event, {"ticker": item["ticker"], "classCode": item["classCode"],
+                               "name": item["showName"], "asset_type": asset_type(item.get("type", ""), item["classCode"]),
+                               "side": side, "price": trade.get("averagePrice"), "currency": trade.get("currency"),
+                               "lot_size": 1 if asset_type(item.get("type", ""), item["classCode"]) == "stock" else None}, settings)
+            if event["asset_type"] == "stock":
+                event["assumption"] = "Условный лот 1 акция; реальный размер лота не проверен"
         match = next((candidate for candidate in recent
                       if candidate["id"] not in matched_ids and candidate["ticker"] == item["ticker"]
                       and candidate["classCode"] == item["classCode"] and candidate["action"] == side
@@ -225,7 +272,7 @@ def poll_once(browser: PulseBrowser, settings: dict, *, emit_events: bool = True
         if match:
             event["source_event_id"] = match["id"]
             matched_ids.add(match["id"])
-        message = f"Пульс · {profile} · {item['ticker']} · {'Покупка' if side == 'buy' else 'Продажа'} · {event['price']}. {event['trade']}. Реальной заявки нет."
+        message = f"Пульс · {profile} · {item['ticker']} · {'Покупка' if side == 'buy' else 'Продажа'} · {event['price']}. {event['trade']}. {event.get('reason', '')} Реальной заявки нет."
         notify(event, settings, message)
         add_event(event)
 
@@ -419,7 +466,7 @@ class Handler(BaseHTTPRequestHandler):
             with LOCK:
                 authenticated = AUTH["status"] == "authenticated"
                 self.respond(200, {"settings": load_settings(), "token_configured": bool(telegram_token()),
-                                   "events": EVENTS,
+                                   "events": EVENTS, "demo_positions": POSITIONS,
                                    "monitor": MONITOR if authenticated else {"status": "stopped", "message": "Ожидаем входа в Пульс", "last_check": None, "instrument_count": 0, "instruments": []},
                                    "auth": AUTH, "today": TODAY if authenticated else []})
         else:
@@ -443,7 +490,7 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError("Нужен объект JSON")
             with LOCK:
                 authenticated = AUTH["status"] == "authenticated"
-            if not authenticated and self.path not in {"/api/auth/start", "/api/browser/show", "/api/auth/check", "/api/settings", "/api/demo"}:
+            if not authenticated and self.path not in {"/api/auth/start", "/api/browser/show", "/api/auth/check", "/api/settings", "/api/demo", "/api/demo/scenario", "/api/demo/reset", "/api/telegram/test"}:
                 self.respond(403, {"error": "Сначала авторизуйся в Пульсе"})
                 return
             if self.path == "/api/settings":
@@ -466,6 +513,38 @@ class Handler(BaseHTTPRequestHandler):
                 notify(event, settings, message)
                 add_event(event)
                 self.respond(200, {"event": event, "events": EVENTS})
+            elif self.path == "/api/demo/scenario":
+                name = data.get("scenario")
+                if not isinstance(name, str) or name not in SCENARIOS:
+                    raise ValueError("Неизвестный демо-сценарий")
+                signal = SCENARIOS[name]
+                settings = load_settings()
+                event = {
+                    "time": datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds"),
+                    "profile": "Демо", "instrument": signal["ticker"], "instrument_name": signal["name"],
+                    "side": signal["side"], "price": f"{signal.get('price') or 'ГО ' + str(signal.get('margin_rub'))} ₽",
+                    "source": "scenario", "scenario": name,
+                }
+                apply_demo(event, signal, settings)
+                notify(event, settings, f"ДЕМО · {signal['name']} · {event['trade']} · {event['reason']}. Реальной заявки нет.")
+                add_event(event)
+                self.respond(200, {"event": event})
+            elif self.path == "/api/demo/reset":
+                with LOCK:
+                    write_state(POSITIONS_PATH, {})
+                    POSITIONS.clear()
+                    EVENTS[:] = [event for event in EVENTS if event.get("source") not in {"scenario", "manual_demo"}]
+                    write_state(EVENTS_PATH, EVENTS)
+                self.respond(200, {"ok": True})
+            elif self.path == "/api/telegram/test":
+                settings = load_settings()
+                event = {"time": datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds"),
+                         "profile": "Демо", "instrument": "TELEGRAM", "side": "test", "price": "—",
+                         "trade": "проверка уведомления", "source": "telegram_test",
+                         "recipient_id": settings["chat_id"]}
+                notify(event, settings, "ДЕМО · Проверка уведомлений T-Invest Bot. Реальной заявки нет.")
+                add_event(event)
+                self.respond(200, {"event": event})
             elif self.path == "/api/history":
                 ticker, class_code = data.get("ticker"), data.get("classCode")
                 cursor = data.get("cursor")
@@ -511,11 +590,16 @@ class Handler(BaseHTTPRequestHandler):
                         "trade_time": candidate["tradeDateTime"], "profile": candidate["profile"],
                         "instrument": candidate["ticker"], "instrument_name": candidate["name"],
                         "side": "buy", "price": f"{candidate['price']} {candidate['currency'] or ''}",
-                        "source": "historic_demo", "source_event_id": candidate_id, "trade": "ДЕМО: куплено",
+                        "source": "historic_demo", "source_event_id": candidate_id,
                     }
+                    apply_demo(event, {"ticker": candidate["ticker"], "classCode": candidate["classCode"],
+                                       "name": candidate["name"], "asset_type": candidate.get("asset_type") or "stock",
+                                       "side": "buy", "price": candidate["price"], "currency": candidate["currency"],
+                                       "lot_size": 1}, load_settings())
+                    event["assumption"] = "Условный лот 1 акция; реальный размер лота не проверен"
                     add_event(event)
                 settings = load_settings()
-                notify(event, settings, f"ДЕМО · {event['profile']} · {event['instrument']} · покупка по {event['price']}. Реальной заявки нет.")
+                notify(event, settings, f"ДЕМО · {event['profile']} · {event['instrument']} · {event['trade']} по {event['price']}. {event['reason']}. Реальной заявки нет.")
                 with LOCK:
                     write_state(EVENTS_PATH, EVENTS)
                 self.respond(200, {"event": event})

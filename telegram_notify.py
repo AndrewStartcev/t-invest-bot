@@ -33,8 +33,10 @@ def send_notification(token: str, chat_id: str, message: str, *, opener=urllib.r
             result = json.load(response)
     except urllib.error.HTTPError as error:
         raise NotificationError(f"Telegram returned HTTP {error.code}") from None
-    except urllib.error.URLError:
+    except (urllib.error.URLError, TimeoutError, OSError):
         raise NotificationError("Telegram is unreachable") from None
+    except (ValueError, UnicodeError):
+        raise NotificationError("Telegram returned an invalid response") from None
     if not isinstance(result, dict) or result.get("ok") is not True:
         raise NotificationError("Telegram did not confirm delivery")
     return "sent"

@@ -52,6 +52,16 @@
     .summary-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:20px; align-items:stretch; }
     .details-grid { display:grid; grid-template-columns:minmax(0,1.85fr) minmax(280px,.8fr); gap:20px; align-items:start; }
     .telegram-health { display:flex; align-items:center; gap:9px; padding:3px 0 9px; font-size:13px; font-weight:730; color:#283e5b; }
+    .rule-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; margin:12px 0 20px; }
+    .rule-box { border:1px solid #e3eaf2; border-radius:8px; padding:14px; background:#f9fbfd; }
+    .rule-box h3 { font-size:12px; margin:0 0 12px; }
+    .rule-box .field { margin-bottom:10px; }
+    .rule-box .field:last-child { margin-bottom:0; }
+    .rule-box .field label { font-size:10px; }
+    .rule-box .field input { height:35px; }
+    .scenario-buttons { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; }
+    .scenario-buttons button { min-height:38px; text-align:left; }
+    .portfolio-list { margin-top:8px; }
     .stack { display:grid; gap:20px; }
     .source-line { display:flex; justify-content:space-between; gap:15px; padding:11px 0; border-bottom:1px solid #edf1f5; font-size:12px; }
     .source-line:last-child { border:0; }
@@ -125,6 +135,7 @@
       .cards { gap:9px; }.card { min-height:94px; padding:13px; }.card strong { font-size:22px; }
       .field-row { grid-template-columns:1fr; gap:0; }.panel-body { padding:16px; }
       .summary-grid { grid-template-columns:1fr; }.auth-body { padding:27px 24px 30px; }
+      .rule-grid { grid-template-columns:1fr; }
     }
   </style>
 </head>
@@ -173,12 +184,12 @@
                 <p class="muted space-top" id="source-message">Подключаемся к Пульсу…</p>
                 <button class="button neutral small space-top" id="refresh-source" type="button">Проверить данные</button>
               </div></section>
-              <section class="panel"><div class="panel-head"><h2>Наш результат</h2><span class="tag">Только демо</span></div><div class="panel-body"><p class="subtle">Покупки, отмеченные ниже, созданы для проверки сценария. Денежные средства и позиции брокерского счёта не подключены.</p><div class="source-line space-top"><span>Тестовых операций</span><b id="demo-total">0</b></div><div class="source-line"><span>Брокерские заявки</span><b>Не выставлялись</b></div></div></section>
+              <section class="panel"><div class="panel-head"><h2>Наш результат</h2><span class="tag">Только демо</span></div><div class="panel-body"><p class="subtle">Условный портфель для проверки правил. Брокерский счёт и реальные деньги не подключены.</p><div class="source-line space-top"><span>Тестовых операций</span><b id="demo-total">0</b></div><div class="source-line"><span>Демо-позиций</span><b id="demo-position-count">0</b></div><div id="demo-positions" class="portfolio-list muted">Позиций пока нет</div><div class="source-line"><span>Последний демо-сигнал</span><b id="last-demo-decision">—</b></div><div class="source-line"><span>Брокерские заявки</span><b>Не выставлялись</b></div></div></section>
             </div>
             <section class="panel"><div class="panel-head"><h2>Сделки автора за 24 часа</h2><span class="tag" id="today-count">0 сделок</span></div><div id="today-list" class="empty">Сделки пока не загружены</div></section>
             <div class="details-grid">
               <section class="panel"><div class="panel-head"><h2>Инструменты профиля</h2><span class="tag" id="instrument-count">0 инструментов</span></div><div class="panel-body"><input class="search" id="instrument-search" type="search" placeholder="Поиск по тикеру или названию" aria-label="Поиск инструмента"></div><div id="instrument-list" class="empty">Данные появятся после входа</div><div class="panel-body"><button class="button neutral small" type="button" id="instrument-more" hidden>Показать ещё</button></div><div id="history-panel" hidden><div class="panel-head"><h2 id="history-title">История</h2><button type="button" class="link" id="history-close">Закрыть</button></div><div id="history-list" class="empty"></div><div class="panel-body"><button class="button neutral small" type="button" id="history-more" hidden>Показать ещё</button></div></div></section>
-              <section class="panel"><div class="panel-head"><h2>Telegram-бот</h2><span class="tag">Уведомления</span></div><div class="panel-body"><div class="telegram-health"><i class="dot" id="telegram-dot"></i><strong id="telegram-state">Проверяем настройки</strong></div><div class="source-line"><span>Получатель</span><b id="telegram-recipient">—</b></div><div class="source-line"><span>Токен</span><b id="telegram-token-state">—</b></div><p class="muted space-top" id="telegram-note">Сообщения отправляются только на указанный ID.</p></div></section>
+              <section class="panel"><div class="panel-head"><h2>Telegram-бот</h2><span class="tag">Уведомления</span></div><div class="panel-body"><div class="telegram-health"><i class="dot" id="telegram-dot"></i><strong id="telegram-state">Проверяем настройки</strong></div><div class="source-line"><span>Получатель</span><b id="telegram-recipient">—</b></div><div class="source-line"><span>Токен</span><b id="telegram-token-state">—</b></div><p class="muted space-top" id="telegram-note">Сообщения отправляются только на указанный ID.</p><button class="button neutral small space-top" id="telegram-test" type="button">Проверить отправку</button><p class="toast space-top" id="telegram-test-result" role="status"></p></div></section>
             </div>
           </div>
         </section>
@@ -187,15 +198,22 @@
           <div class="settings-grid">
             <section class="panel"><div class="panel-head"><h2>Мониторинг</h2><span class="tag">Один профиль</span></div><form class="panel-body" id="settings-form">
               <div class="field"><label for="profile">Ссылка на профиль Пульса</label><input id="profile" type="url" required autocomplete="off"></div>
-              <div class="field"><label>Режим работы</label><div class="segment"><button class="active" id="mode-demo" type="button">Демо</button><button id="mode-live" type="button">Реальная работа</button></div><small>«Реальная работа» включает живой мониторинг. Все покупки остаются демо.</small></div>
+              <div class="field"><label>Режим работы</label><div class="segment"><button class="active" id="mode-demo" type="button">Демо</button><button id="mode-live" type="button">Мониторинг</button></div><small>Мониторинг читает новые сделки. Брокерские заявки отключены в обоих режимах.</small></div>
               <div class="field-row"><div class="field"><label for="interval">Интервал проверки, сек.</label><input id="interval" type="number" min="30" max="3600" required><small>От 30 до 3600 секунд</small></div><div class="field"><label for="chat">Telegram ID получателя</label><input id="chat" type="text" inputmode="numeric" autocomplete="off" placeholder="Не указан"><small>Пустой ID — сообщения не отправляются</small></div></div>
               <div class="field"><label for="token">Токен Telegram-бота</label><input id="token" type="password" autocomplete="new-password" placeholder="Не задан"><small id="token-hint">Хранится только локально; сохранённый токен не показывается</small></div>
-              <label class="switch"><span><b>Авто-покупка · демо</b><small>Новую покупку автора отмечать как тестово исполненную</small></span><input id="auto-buy" type="checkbox"></label>
+              <div class="field"><label>Лимиты демо-сделок</label><small>Стартовые значения для показа. Суммы из видео клиента ещё требуют подтверждения.</small></div>
+              <div class="rule-grid">
+                <div class="rule-box"><h3>Акции</h3><div class="field"><label for="stock-budget">Бюджет покупки, ₽</label><input id="stock-budget" type="number" min="1" max="10000000" required></div><div class="field"><label for="stock-lot">Максимальная цена одного лота, ₽</label><input id="stock-lot" type="number" min="1" max="10000000" required></div><div class="field"><label for="stock-position">Лимит позиции, ₽</label><input id="stock-position" type="number" min="1" max="10000000" required></div></div>
+                <div class="rule-box"><h3>Облигации</h3><div class="field"><label for="bond-budget">Бюджет покупки, ₽</label><input id="bond-budget" type="number" min="1" max="10000000" required></div><div class="field"><label for="bond-lot">Максимальная цена одного лота, ₽</label><input id="bond-lot" type="number" min="1" max="10000000" required></div><div class="field"><label for="bond-position">Лимит позиции, ₽</label><input id="bond-position" type="number" min="1" max="10000000" required></div></div>
+                <div class="rule-box"><h3>Фонды</h3><div class="field"><label for="fund-budget">Бюджет покупки, ₽</label><input id="fund-budget" type="number" min="1" max="10000000" required></div><div class="field"><label for="fund-lot">Максимальная цена одного лота, ₽</label><input id="fund-lot" type="number" min="1" max="10000000" required></div><div class="field"><label for="fund-position">Лимит позиции, ₽</label><input id="fund-position" type="number" min="1" max="10000000" required></div></div>
+                <div class="rule-box"><h3>Фьючерсы</h3><div class="field"><label for="future-margin">Лимит обеспечения, ₽</label><input id="future-margin" type="number" min="1" max="10000000" required></div><div class="field"><label for="future-contracts">Максимум контрактов</label><input id="future-contracts" type="number" min="1" max="100" required></div><div class="field"><label for="sell-percent">Продажа своей позиции, %</label><input id="sell-percent" type="number" min="1" max="100" required></div></div>
+              </div>
+              <label class="switch"><span><b>Автоисполнение · демо</b><small>Новые сигналы автора проверяются по лимитам; продажи без своей демо-позиции пропускаются. Для акций Пульса лот условно равен 1.</small></span><input id="auto-buy" type="checkbox"></label>
               <label class="switch"><span><b>Пауза уведомлений</b><small>Сигналы остаются в журнале</small></span><input id="paused" type="checkbox"></label>
               <div class="form-actions"><button class="button" type="submit">Сохранить настройки</button><button class="button neutral" id="open-pulse" type="button">Открыть окно Пульса</button><span class="toast" id="settings-message" role="status"></span></div>
             </form></section>
             <div class="stack">
-              <section class="panel" id="scenario-panel"><div class="panel-head"><h2>Проверка сценария</h2><span class="tag">Демо</span></div><div class="panel-body"><div class="demo-box"><span><b>DEMO</b><small>Тестовый инструмент</small></span><b>100 ₽</b></div><div class="demo-actions"><button class="button ghost" id="buy" type="button">Тестовая покупка</button><button class="button neutral" id="sell" type="button">Тестовая продажа</button></div><p class="muted space-top">Появится запись в журнале. При настроенном Telegram придёт сообщение с пометкой «ДЕМО».</p><span class="toast" id="demo-message" role="status"></span></div></section>
+              <section class="panel" id="scenario-panel"><div class="panel-head"><h2>Проверка сценария</h2><span class="tag">Демо</span></div><div class="panel-body"><p class="subtle">Запусти по порядку: покупка, продажа, дорогая акция, затем фьючерсы. Решение и причина появятся в журнале.</p><div class="scenario-buttons space-top"><button class="button ghost" data-scenario="stock_buy" type="button">Купить акцию · 500 ₽</button><button class="button neutral" data-scenario="stock_sell" type="button">Продать свою акцию</button><button class="button ghost" data-scenario="expensive_stock" type="button">Дорогая акция · 8 000 ₽</button><button class="button neutral" data-scenario="bond_buy" type="button">Купить облигацию · 1 000 ₽</button><button class="button ghost" data-scenario="fund_buy" type="button">Купить фонд · 250 ₽</button><button class="button neutral" data-scenario="future_over_limit" type="button">Фьючерс · ГО 27 000 ₽</button><button class="button ghost" data-scenario="future_buy" type="button">Фьючерс · ГО 9 000 ₽</button><button class="button neutral" data-scenario="future_sell" type="button">Закрыть фьючерс</button></div><div class="form-actions"><button class="button neutral small" id="reset-demo" type="button">Сбросить демо и тестовые записи</button></div><p class="muted space-top">Заявки брокеру не отправляются. Telegram получит сообщение только если задан ID и токен.</p><span class="toast" id="demo-message" role="status"></span></div></section>
               <section class="panel"><div class="panel-head"><h2>Статус подключения</h2></div><div class="panel-body"><div class="source-line"><span>Пульс</span><b id="auth-summary">—</b></div><div class="source-line"><span>Telegram-бот</span><b id="bot-summary">—</b></div><div class="source-line"><span>Брокерский счёт</span><b>Не подключён</b></div></div></section>
             </div>
           </div>
@@ -325,8 +343,19 @@
     function renderEvents(){
       const box=el('events');box.replaceChildren();el('event-count').textContent=events.length+' событий';
       if(!events.length){box.className='empty';box.textContent='Событий пока нет';return;}box.className='table-wrap';
-      const table=document.createElement('table'),head=document.createElement('thead');head.innerHTML='<tr><th>Обнаружено</th><th>Сигнал</th><th>Профиль</th><th>Telegram</th><th>Результат</th></tr>';table.append(head);const body=document.createElement('tbody');
-      for(const item of events){const row=document.createElement('tr');const values=[fmtDate(item.time),item.instrument+' · '+item.price,item.profile,item.notification||'—',item.trade];for(const value of values){const cell=document.createElement('td');cell.textContent=value;row.append(cell);}body.append(row);}table.append(body);box.append(table);
+      const table=document.createElement('table'),head=document.createElement('thead');head.innerHTML='<tr><th>Обнаружено</th><th>Сигнал</th><th>Профиль</th><th>Результат</th><th>Объём демо</th><th>Причина</th><th>Telegram</th></tr>';table.append(head);table.style.minWidth='1000px';const body=document.createElement('tbody');
+      for(const item of events){const row=document.createElement('tr');const volume=item.quantity?item.quantity+' лот/контр. · '+item.amount_rub+' ₽':'—';const values=[fmtDate(item.time),item.instrument+' · '+item.price,item.profile,item.trade,volume,item.reason||'—',item.notification||'—'];for(const value of values){const cell=document.createElement('td');cell.textContent=value;row.append(cell);}body.append(row);}table.append(body);box.append(table);
+    }
+    function ruleValues(){
+      const rules={};
+      for(const asset of ['stock','bond','fund'])rules[asset]={budget:Number(el(asset+'-budget').value),single_lot_cap:Number(el(asset+'-lot').value),position_cap:Number(el(asset+'-position').value)};
+      rules.future={margin_budget:Number(el('future-margin').value),max_contracts:Number(el('future-contracts').value)};
+      rules.sell_percent=Number(el('sell-percent').value);
+      return rules;
+    }
+    function fillRules(rules){
+      for(const asset of ['stock','bond','fund'])for(const [suffix,key] of [['budget','budget'],['lot','single_lot_cap'],['position','position_cap']])el(asset+'-'+suffix).value=rules[asset][key];
+      el('future-margin').value=rules.future.margin_budget;el('future-contracts').value=rules.future.max_contracts;el('sell-percent').value=rules.sell_percent;
     }
     function renderState(state){
       renderAuth(state.auth);instruments=state.monitor.instruments||[];today=state.today||[];events=state.events||[];
@@ -339,16 +368,24 @@
       el('last-check').textContent=state.monitor.last_check?fmtDate(state.monitor.last_check):'—';
       el('source-message').textContent=state.auth.status==='authenticated'?state.monitor.message:state.auth.message;el('instrument-total').textContent=instruments.length;
       const buys=today.filter(item=>item.action==='buy').length,sells=today.filter(item=>item.action==='sell').length;
-      const demos=events.filter(item=>item.trade==='ДЕМО: куплено');
-      el('source-buys').textContent=buys;el('source-sells').textContent=sells;el('our-buys').textContent=demos.length;el('demo-total').textContent=demos.length;
+      const demos=events.filter(item=>item.trade==='ДЕМО: куплено'||item.trade==='ДЕМО: продано');
+      el('source-buys').textContent=buys;el('source-sells').textContent=sells;el('our-buys').textContent=demos.filter(item=>item.side==='buy').length;el('demo-total').textContent=demos.length;
+      const lastScenario=events.find(item=>item.source==='scenario');
+      el('last-demo-decision').textContent=lastScenario?lastScenario.instrument+' · '+lastScenario.trade.replace('ДЕМО: ',''):'—';
+      const positions=Object.values(state.demo_positions||{}).filter(item=>item.quantity>0),portfolio=el('demo-positions');
+      el('demo-position-count').textContent=positions.length;portfolio.replaceChildren();
+      if(!positions.length)portfolio.textContent='Позиций пока нет';
+      for(const item of positions){const line=document.createElement('div');line.className='source-line';const label=document.createElement('span'),value=document.createElement('b');label.textContent=item.name||item.ticker;value.textContent=item.quantity+' лот/контр.';line.append(label,value);portfolio.append(line);}
       tokenConfigured=state.token_configured;
       const hasRecipient=Boolean(state.settings.chat_id);
-      const botReady=tokenConfigured&&hasRecipient&&!state.settings.paused;
-      el('telegram-state').textContent=state.settings.paused?'На паузе':!hasRecipient?'ID не указан':!tokenConfigured?'Токен не задан':'Активен';
-      el('telegram-dot').className='dot'+(botReady?' good':' bad');
+      const lastTest=events.find(item=>item.source==='telegram_test'&&item.recipient_id===state.settings.chat_id);
+      const testPassed=lastTest?.notification==='отправлено';
+      const testFailed=lastTest&&lastTest.notification!=='отправлено';
+      el('telegram-state').textContent=state.settings.paused?'На паузе':!hasRecipient?'ID не указан':!tokenConfigured?'Токен не задан':testPassed?'Работает':testFailed?'Ошибка доставки':'Настроен · не проверен';
+      el('telegram-dot').className='dot'+(testPassed&&!state.settings.paused?' good':state.settings.paused||!hasRecipient||!tokenConfigured||testFailed?' bad':'');
       el('telegram-recipient').textContent=hasRecipient?'ID '+state.settings.chat_id:'Не указан';
       el('telegram-token-state').textContent=tokenConfigured?'Сохранён':'Не задан';
-      el('telegram-note').textContent=state.settings.paused?'Отправка уведомлений приостановлена.':!hasRecipient?'Без ID получателя бот ничего не отправляет.':!tokenConfigured?'Укажи токен бота в настройках.':'Сообщения отправляются только на указанный ID.';
+      el('telegram-note').textContent=state.settings.paused?'Отправка уведомлений приостановлена.':!hasRecipient?'Без ID получателя бот ничего не отправляет.':!tokenConfigured?'Укажи токен бота в настройках.':testFailed?lastTest.notification:'Нажми «Проверить отправку», чтобы подтвердить доставку.';
       el('bot-summary').textContent=tokenConfigured?'Токен сохранён':'Токен не задан';
       el('token-hint').textContent=tokenConfigured?'Токен сохранён локально; введи новый, чтобы заменить':'Токен хранится только локально и не показывается';
       renderToday();renderInstruments();renderEvents();
@@ -357,17 +394,23 @@
     async function load(){
       const state=await api('/api/state');
       el('profile').value=state.settings.profile_url;el('interval').value=state.settings.poll_seconds;el('chat').value=state.settings.chat_id;
-      el('paused').checked=state.settings.paused;el('auto-buy').checked=state.settings.auto_demo_buy;setMode(state.settings.monitoring_enabled);
+      el('paused').checked=state.settings.paused;el('auto-buy').checked=state.settings.auto_demo_buy;setMode(state.settings.monitoring_enabled);fillRules(state.settings.rules);
       renderState(state);
     }
     el('settings-form').addEventListener('submit',async event=>{
       event.preventDefault();const message=el('settings-message');
-      try{await api('/api/settings',{profile_url:el('profile').value,poll_seconds:Number(el('interval').value),chat_id:el('chat').value,telegram_token:el('token').value,paused:el('paused').checked,monitoring_enabled:liveMode,auto_demo_buy:el('auto-buy').checked});
+      try{await api('/api/settings',{profile_url:el('profile').value,poll_seconds:Number(el('interval').value),chat_id:el('chat').value,telegram_token:el('token').value,paused:el('paused').checked,monitoring_enabled:liveMode,auto_demo_buy:el('auto-buy').checked,rules:ruleValues()});
         el('token').value='';message.className='toast';message.textContent='Настройки сохранены';await refresh();
       }catch(error){message.className='toast error';message.textContent=error.message;}
     });
-    async function demo(side){const message=el('demo-message');try{await api('/api/demo',{side});message.className='toast';message.textContent='Тестовая запись добавлена';await refresh();}catch(error){message.className='toast error';message.textContent=error.message;}}
-    el('buy').addEventListener('click',()=>demo('buy'));el('sell').addEventListener('click',()=>demo('sell'));
+    for(const button of document.querySelectorAll('[data-scenario]'))button.addEventListener('click',async()=>{
+      const message=el('demo-message');button.disabled=true;
+      try{const response=await api('/api/demo/scenario',{scenario:button.dataset.scenario});message.className=response.event.demo_status==='blocked'?'toast error':'toast';message.textContent=response.event.trade+' · '+response.event.reason;await refresh();}
+      catch(error){message.className='toast error';message.textContent=error.message;}
+      finally{button.disabled=false;}
+    });
+    el('reset-demo').addEventListener('click',async()=>{const message=el('demo-message');try{await api('/api/demo/reset',{});message.className='toast';message.textContent='Демо-портфель и тестовые записи очищены';await refresh();}catch(error){message.className='toast error';message.textContent=error.message;}});
+    el('telegram-test').addEventListener('click',async()=>{const button=el('telegram-test'),message=el('telegram-test-result');button.disabled=true;try{const response=await api('/api/telegram/test',{});const sent=response.event.notification==='отправлено';message.className=sent?'toast space-top':'toast error space-top';message.textContent=response.event.notification;await refresh();}catch(error){message.className='toast error space-top';message.textContent=error.message;}finally{button.disabled=false;}});
     load().catch(error=>{el('auth-message').textContent=error.message;});
     setInterval(()=>refresh().catch(()=>{}),3000);
   </script>

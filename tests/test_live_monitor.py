@@ -86,6 +86,7 @@ class LiveMonitorTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder, patch.object(demo_admin, "AUTH", {"status": "authenticated"}), \
                 patch.object(demo_admin, "TODAY", [candidate]), patch.object(demo_admin, "EVENTS", []), \
                 patch.object(demo_admin, "EVENTS_PATH", Path(folder) / "events.json"), \
+                patch.object(demo_admin, "POSITIONS_PATH", Path(folder) / "positions.json"), patch.object(demo_admin, "POSITIONS", {}), \
                 patch.object(demo_admin, "load_settings", return_value={"profile_url": "https://www.tbank.ru/invest/social/profile/LinMath/", "paused": False, "chat_id": ""}), \
                 patch.object(demo_admin, "notify", side_effect=lambda event, settings, message: event.update(notification="not sent")):
             server = ThreadingHTTPServer(("127.0.0.1", 0), demo_admin.Handler)
@@ -261,7 +262,7 @@ class LiveMonitorTests(unittest.TestCase):
         self.assertEqual(browser.instrument_urls, {})
 
     def test_baseline_new_buys_and_restart(self):
-        with tempfile.TemporaryDirectory() as folder, patch.object(demo_admin, "STATE_PATH", Path(folder) / "state.json"), patch.object(demo_admin, "EVENTS_PATH", Path(folder) / "events.json"), patch.object(demo_admin, "EVENTS", []):
+        with tempfile.TemporaryDirectory() as folder, patch.object(demo_admin, "STATE_PATH", Path(folder) / "state.json"), patch.object(demo_admin, "EVENTS_PATH", Path(folder) / "events.json"), patch.object(demo_admin, "EVENTS", []), patch.object(demo_admin, "POSITIONS_PATH", Path(folder) / "positions.json"), patch.object(demo_admin, "POSITIONS", {}):
             browser = FakeBrowser()
             settings = {"profile_url": "https://www.tbank.ru/invest/social/profile/LinMath/", "auto_demo_buy": True,
                         "paused": False, "chat_id": ""}
