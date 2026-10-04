@@ -31,6 +31,23 @@ class FakeBrowser:
 
 
 class LiveMonitorTests(unittest.TestCase):
+    def test_history_accepts_encoded_pulse_ticker(self):
+        browser = PulseBrowser(Path("unused"))
+        browser.list_url = "https://www.tbank.ru/api/profile/instrument?sessionId=test"
+        requested = []
+
+        def fetch(url):
+            requested.append(url)
+            return {"ok": True, "status": 200, "data": {"payload": {"items": [], "hasNext": False}}}
+
+        browser._fetch = fetch
+        self.assertEqual(browser.history("1COV@DE", "SPBXM"),
+                         {"items": [], "hasNext": False, "nextCursor": None})
+        self.assertIn("/operation/instrument/1COV%40DE/SPBXM", requested[0])
+        self.assertIn("sessionId=test", requested[0])
+        with self.assertRaisesRegex(PulseError, "История инструмента недоступна"):
+            browser.history("..", "SPBXM")
+
     def test_month_history_reads_all_pages_and_keeps_old_trades_read_only(self):
         now = datetime.now(timezone.utc)
         def trade(days, action="buy"):
@@ -59,6 +76,29 @@ class LiveMonitorTests(unittest.TestCase):
             self.assertEqual(len(demo_admin.MONTH["items"]), 3)
             self.assertTrue(all(not item["can_demo_buy"] for item in demo_admin.MONTH["items"]))
             self.assertEqual(browser.cursors, [None, "second"])
+
+    def test_month_scan_reports_missing_instrument_and_keeps_other_trades(self):
+        now = datetime.now(timezone.utc)
+
+        class Browser:
+            def history(self, ticker, class_code, cursor=None):
+                if ticker == "MISSING":
+                    raise PulseError("Пульс вернул HTTP 404; проверь вход в браузере")
+                return {"items": [{"tradeDateTime": now.isoformat(), "action": "buy",
+                                   "averagePrice": 100, "currency": "rub"}],
+                        "hasNext": False, "nextCursor": None}
+
+        targets = [{"ticker": ticker, "classCode": "TQBR", "showName": ticker, "type": "stock"}
+                   for ticker in ("MISSING", "ROSN")]
+        scan = {"profile": "LinMath", "cutoff": now - timedelta(days=30), "targets": targets,
+                "index": 0, "found": [], "cursor": None, "seen_cursors": set(),
+                "occurrences": {}, "pages": 0, "skipped": []}
+        with patch.object(demo_admin, "MONTH", {"status": "loading", "items": []}):
+            self.assertFalse(demo_admin.advance_month_scan(Browser(), scan, batch_size=2))
+            self.assertTrue(demo_admin.advance_month_scan(Browser(), scan))
+            self.assertEqual([item["ticker"] for item in demo_admin.MONTH["items"]], ["ROSN"])
+            self.assertEqual(demo_admin.MONTH["skipped"], ["MISSING"])
+            self.assertIn("частично", demo_admin.MONTH["message"])
 
     def test_month_request_queues_background_scan(self):
         requests = queue.Queue()

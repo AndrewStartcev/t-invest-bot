@@ -305,9 +305,9 @@
       el('trades-heading').textContent=monthView?'Сделки автора за 30 дней':'Сделки автора за 24 часа';
       el('month-button').textContent=monthView?'Вернуться к 24 часам':'Посмотреть за месяц';
       el('today-count').textContent=monthView&&month.status==='loading'?'Загрузка…':items.length+' сделок';
-      const monthMessage=el('month-message');monthMessage.className=month.status==='error'?'toast error space-top':'toast space-top';
-      monthMessage.textContent=monthView?(month.status==='loading'?month.message||'Читаем историю за 30 дней…':month.status==='error'?month.message||'История не загрузилась':month.status==='ready'?'Загружено за последние 30 дней · только сделки не старше 24 часов можно повторить':'Месячная история не загружена; вернись к 24 часам и открой её снова'):'';
-      if(!items.length){box.className='empty';box.textContent=monthView?(month.status==='ready'?'За последние 30 дней опубликованных сделок не найдено':month.status==='error'?'Загрузка не удалась. Вернись к 24 часам и нажми «Посмотреть за месяц» ещё раз.':'Загружаем сделки автора за 30 дней…'):'За последние 24 часа опубликованных сделок не найдено';return;}
+      const monthMessage=el('month-message');monthMessage.className=month.status==='error'||month.skipped?.length?'toast error space-top':'toast space-top';
+      monthMessage.textContent=monthView?(month.status==='loading'?month.message||'Читаем историю за 30 дней…':month.status==='error'?month.message||'История не загрузилась':month.status==='ready'?(month.skipped?.length?`${month.message}. Пропущены: ${month.skipped.slice(0,5).join(', ')}${month.skipped.length>5?' и другие':''}.`:'Загружено за последние 30 дней · только сделки не старше 24 часов можно повторить'):'Месячная история не загружена; вернись к 24 часам и открой её снова'):'';
+      if(!items.length){box.className='empty';box.textContent=monthView?(month.status==='ready'?(month.skipped?.length?'Доступных сделок за 30 дней не найдено; часть инструментов пропущена':'За последние 30 дней опубликованных сделок не найдено'):month.status==='error'?'Загрузка не удалась. Вернись к 24 часам и нажми «Посмотреть за месяц» ещё раз.':'Загружаем сделки автора за 30 дней…'):'За последние 24 часа опубликованных сделок не найдено';return;}
       box.className='table-wrap';const table=document.createElement('table');
       const head=document.createElement('thead');head.innerHTML='<tr><th>Время</th><th>Инструмент</th><th>Действие</th><th>Цена</th><th>Операция</th></tr>';table.append(head);
       const body=document.createElement('tbody');

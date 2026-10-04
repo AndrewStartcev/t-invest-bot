@@ -571,13 +571,30 @@ def advance_month_scan(browser: PulseBrowser, scan: dict, batch_size: int = 1) -
     """Read a few history pages in the monitor thread between regular polls."""
     for _ in range(batch_size):
         if scan["index"] >= len(scan["targets"]):
+            skipped = scan.get("skipped", [])
             with LOCK:
                 MONTH.update(status="ready", items=sorted(scan["found"], key=lambda item: item["tradeDateTime"], reverse=True),
-                             processed=scan["index"], message="История за 30 дней загружена",
+                             processed=scan["index"], skipped=skipped,
+                             message=(f"История загружена частично: не удалось прочитать {len(skipped)} инструмент(ов)"
+                                      if skipped else "История за 30 дней загружена"),
                              loaded_at=datetime.now(timezone.utc).isoformat())
             return True
         item = scan["targets"][scan["index"]]
-        page = browser.history(item["ticker"], item["classCode"], scan["cursor"])
+        try:
+            page = browser.history(item["ticker"], item["classCode"], scan["cursor"])
+        except PulseError as error:
+            if not (str(error) == "История инструмента недоступна" or "HTTP 404" in str(error)):
+                raise
+            scan.setdefault("skipped", []).append(item["ticker"])
+            scan["index"] += 1
+            scan["cursor"] = None
+            scan["seen_cursors"] = set()
+            scan["occurrences"] = {}
+            scan["pages"] = 0
+            with LOCK:
+                MONTH.update(processed=scan["index"],
+                             message=f"Проверено инструментов: {scan['index']} из {len(scan['targets'])}; часть истории недоступна")
+            continue
         scan["pages"] += 1
         if scan["pages"] > 500:
             raise PulseError(f"Слишком много страниц истории {item['ticker']}")
@@ -781,11 +798,11 @@ def monitor_loop() -> None:
                     cutoff = datetime.now(timezone.utc) - timedelta(days=30)
                     with LOCK:
                         targets = month_targets(MONITOR["instruments"], cutoff)
-                        MONTH.update(status="loading", items=[], processed=0, total=len(targets),
+                        MONTH.update(status="loading", items=[], processed=0, total=len(targets), skipped=[],
                                      message="Читаем историю за 30 дней", loaded_at=None)
                     month_scan = {"profile": operations_url(settings["profile_url"])[0], "cutoff": cutoff,
                                   "targets": targets, "index": 0, "found": [], "cursor": None,
-                                  "seen_cursors": set(), "occurrences": {}, "pages": 0}
+                                  "seen_cursors": set(), "occurrences": {}, "pages": 0, "skipped": []}
                 elif request["action"] == "month":
                     with LOCK:
                         MONTH.update(status="error", message="Сначала подключи Пульс")

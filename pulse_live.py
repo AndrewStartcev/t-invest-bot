@@ -336,10 +336,14 @@ class PulseBrowser:
         return name, instruments
 
     def history(self, ticker: str, class_code: str, cursor: str | int | None = None) -> dict:
-        if not self.list_url or not re.fullmatch(r"[A-Za-z0-9._-]+", ticker) or not re.fullmatch(r"[A-Za-z0-9._-]+", class_code):
+        def valid_component(value: str) -> bool:
+            return (isinstance(value, str) and 0 < len(value) <= 128 and value not in {".", ".."}
+                    and not any(ord(char) < 32 or ord(char) == 127 for char in value))
+
+        if not self.list_url or not valid_component(ticker) or not valid_component(class_code):
             raise PulseError("История инструмента недоступна")
         parsed = urlparse(self.list_url)
-        path = parsed.path.rsplit("/instrument", 1)[0] + f"/operation/instrument/{quote(ticker)}/{quote(class_code)}"
+        path = parsed.path.rsplit("/instrument", 1)[0] + f"/operation/instrument/{quote(ticker, safe='')}/{quote(class_code, safe='')}"
         url = urlunparse(parsed._replace(path=path))
         data = payload(self._fetch(with_cursor(url, cursor) if cursor is not None else url))
         return {"items": [{key: item.get(key) for key in ("tradeDateTime", "action", "currency", "averagePrice")}
