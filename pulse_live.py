@@ -180,8 +180,18 @@ class PulseBrowser:
                     self.window_handles = set(visible_browser_windows()) - self.windows_before_open
                 except (AttributeError, OSError):
                     self.window_handles = set()
-        except Exception:
-            self.close()
+        except Exception as error:
+            try:
+                self.close()
+            except Exception:
+                pass
+            if "ERR_CERT_AUTHORITY_INVALID" in str(error):
+                raise PulseError(
+                    "Защищённое соединение с Т-Банком не подтверждено "
+                    "(ERR_CERT_AUTHORITY_INVALID). Проверь дату и время Windows, "
+                    "затем открой tbank.ru в обычном браузере на этом компьютере. "
+                    "Вход остановлен."
+                ) from error
             raise
 
     def show(self) -> None:

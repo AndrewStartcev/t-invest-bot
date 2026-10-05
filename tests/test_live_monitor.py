@@ -3,6 +3,8 @@ import threading
 import unittest
 import json
 import queue
+import sys
+from types import ModuleType
 from datetime import datetime, timedelta, timezone
 from http.server import ThreadingHTTPServer
 from pathlib import Path
@@ -408,6 +410,48 @@ class LiveMonitorTests(unittest.TestCase):
         with patch("pulse_live.visible_browser_windows", side_effect=AttributeError("Win32 unavailable")):
             browser.show()
         self.assertTrue(browser.page.raised)
+
+    def test_certificate_error_stops_login_with_clear_message(self):
+        closed = []
+
+        class Page:
+            def goto(self, *args, **kwargs):
+                raise RuntimeError("Page.goto: net::ERR_CERT_AUTHORITY_INVALID")
+
+        class Context:
+            pages = [Page()]
+
+            def on(self, *args):
+                pass
+
+            def close(self):
+                closed.append(True)
+
+        class Chromium:
+            def launch_persistent_context(self, *args, **kwargs):
+                return Context()
+
+        class Playwright:
+            chromium = Chromium()
+
+            def stop(self):
+                pass
+
+        class Manager:
+            def start(self):
+                return Playwright()
+
+        package = ModuleType("playwright")
+        sync_api = ModuleType("playwright.sync_api")
+        sync_api.sync_playwright = lambda: Manager()
+        with tempfile.TemporaryDirectory() as folder, patch.dict(sys.modules, {
+                "playwright": package, "playwright.sync_api": sync_api}), \
+                patch("pulse_live.browser_executable", return_value="fake-browser"), \
+                patch("pulse_live.visible_browser_windows", return_value={}):
+            browser = PulseBrowser(Path(folder))
+            with self.assertRaisesRegex(PulseError, "ERR_CERT_AUTHORITY_INVALID"):
+                browser.open(demo_admin.DEFAULTS["profile_url"])
+        self.assertEqual(closed, [True])
 
     def test_profile_and_cursor(self):
         self.assertEqual(operations_url("https://www.tbank.ru/invest/social/profile/LinMath/")[0], "LinMath")
