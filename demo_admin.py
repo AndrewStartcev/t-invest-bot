@@ -858,6 +858,10 @@ def monitor_loop() -> None:
                     if browser.return_to_trades_after_login(settings["profile_url"]):
                         with LOCK:
                             AUTH.update(status="waiting", message="Вход завершён, открываем сделки автора")
+                    if browser.visible_trades_page(settings["profile_url"]):
+                        # The bank may show trades before its data API responds. Preserve
+                        # the browser login now, but confirm access only after a snapshot.
+                        browser.save_session()
                     if browser.nickname_url and browser.instrument_urls:
                         browser.resolve_target()
                     if browser.list_url:

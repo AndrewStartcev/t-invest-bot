@@ -341,6 +341,9 @@ class LiveMonitorTests(unittest.TestCase):
             browser.save_session()
             saved = json.loads((Path(folder) / "pulse-session.json").read_text(encoding="utf-8"))
             self.assertEqual([cookie["name"] for cookie in saved["cookies"]], ["session"])
+            with patch("pulse_live.os.replace") as replace:
+                browser.save_session()
+                replace.assert_not_called()
 
     def test_auth_button_queues_one_open_without_waiting_for_browser(self):
         requests = queue.Queue()

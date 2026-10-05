@@ -195,8 +195,15 @@ class PulseBrowser:
         if not cookies:
             return
         session_path = self.profile_dir / "pulse-session.json"
+        saved = {"cookies": cookies}
+        if session_path.exists():
+            try:
+                if json.loads(session_path.read_text(encoding="utf-8")) == saved:
+                    return
+            except (OSError, ValueError):
+                pass
         temporary = session_path.with_suffix(".tmp")
-        temporary.write_text(json.dumps({"cookies": cookies}), encoding="utf-8")
+        temporary.write_text(json.dumps(saved), encoding="utf-8")
         os.replace(temporary, session_path)
 
     def _observe_response(self, response) -> None:
