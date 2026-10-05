@@ -16,6 +16,10 @@ class PulseError(Exception):
     pass
 
 
+PULSE_WEB_HOST = "www.tbank-online.com"
+PULSE_PROFILE_HOSTS = {"tbank.ru", "www.tbank.ru", "tbank-online.com", PULSE_WEB_HOST}
+
+
 def visible_browser_windows() -> dict[int, int]:
     """Return visible Chromium window handles and their pixel areas on Windows."""
     if os.name != "nt":
@@ -62,7 +66,8 @@ def raise_browser_window(hwnd: int) -> None:
 
 def is_tbank_cookie(cookie: dict) -> bool:
     domain = str(cookie.get("domain", "")).lstrip(".").lower()
-    return domain == "tbank.ru" or domain.endswith(".tbank.ru")
+    return any(domain == root or domain.endswith("." + root)
+               for root in ("tbank.ru", "tbank-online.com"))
 
 
 def browser_executable() -> str | None:
@@ -77,20 +82,25 @@ def browser_executable() -> str | None:
 
 def operations_url(profile_url: str) -> tuple[str, str]:
     parsed = urlparse(profile_url)
-    if parsed.scheme != "https" or parsed.hostname not in {"tbank.ru", "www.tbank.ru"}:
-        raise PulseError("Укажи HTTPS-ссылку на профиль tbank.ru")
+    if parsed.scheme != "https" or parsed.hostname not in PULSE_PROFILE_HOSTS:
+        raise PulseError("Укажи HTTPS-ссылку на профиль tbank-online.com или tbank.ru")
     match = re.fullmatch(r"/invest/(?:social|pulse)/profile/([^/]+)(?:/operations)?/?", parsed.path)
     if not match:
         raise PulseError("Нужна ссылка вида /invest/social/profile/Имя/")
     name = match.group(1)
-    return name, f"https://www.tbank.ru/invest/pulse/profile/{quote(name)}/operations/"
+    return name, f"https://{PULSE_WEB_HOST}/invest/pulse/profile/{quote(name)}/operations/"
+
+
+def canonical_profile_url(profile_url: str) -> str:
+    name, _ = operations_url(profile_url)
+    return f"https://{PULSE_WEB_HOST}/invest/social/profile/{quote(name)}/"
 
 
 def is_operations_page(page_url: str, profile_url: str) -> bool:
     name, _ = operations_url(profile_url)
     parsed = urlparse(page_url)
     match = re.fullmatch(r"/invest/(?:social|pulse)/profile/([^/]+)/operations/?", parsed.path)
-    return (parsed.hostname in {"tbank.ru", "www.tbank.ru"} and match is not None
+    return (parsed.hostname in PULSE_PROFILE_HOSTS and match is not None
             and unquote(match.group(1)).casefold() == unquote(name).casefold())
 
 
@@ -189,7 +199,7 @@ class PulseBrowser:
                 raise PulseError(
                     "Защищённое соединение с Т-Банком не подтверждено "
                     "(ERR_CERT_AUTHORITY_INVALID). Проверь дату и время Windows, "
-                    "затем открой tbank.ru в обычном браузере на этом компьютере. "
+                    "затем открой страницу Пульса в обычном браузере на этом компьютере. "
                     "Вход остановлен."
                 ) from error
             raise
@@ -255,7 +265,7 @@ class PulseBrowser:
         if self.headless or not self.context or not self.recover_page():
             return False
         pages = [page for page in self.context.pages if not page.is_closed()]
-        login_open = any(urlparse(page.url).hostname == "id.tbank.ru"
+        login_open = any(urlparse(page.url).hostname in {"id.tbank.ru", "id.tbank-online.com"}
                          or urlparse(page.url).path == "/auth"
                          or "/auth/" in urlparse(page.url).path for page in pages)
         trades_visible = (time.monotonic() - self.opened_at >= 8
@@ -269,7 +279,7 @@ class PulseBrowser:
             self.saw_login_page = True
         if not self.saw_login_page:
             return False
-        if not any(urlparse(page.url).hostname in {"tbank.ru", "www.tbank.ru"} for page in pages):
+        if not any(urlparse(page.url).hostname in PULSE_PROFILE_HOSTS for page in pages):
             return False
         now = time.monotonic()
         if self.login_return_attempts >= 3 or now - self.last_login_return < 12:

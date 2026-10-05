@@ -20,7 +20,7 @@ from demo_engine import DEFAULT_RULES, asset_type, simulate, validated_rules
 from broker_read import BrokerError, account_snapshot, read_only_accounts
 from broker_trade import TradeError, full_access_accounts, order_state, prepare_order, submit_order
 from telegram_notify import NotificationError, send_notification
-from pulse_live import PulseBrowser, PulseError, operations_url
+from pulse_live import PulseBrowser, PulseError, canonical_profile_url, operations_url
 from pulse_replay import write_state
 
 
@@ -36,7 +36,7 @@ TRADE_TOKEN_PATH = ROOT / ".local" / "broker-trade-token.txt"
 TRADE_ACCOUNT_PATH = ROOT / ".local" / "trade-account.txt"
 REAL_ORDERS_PATH = ROOT / ".local" / "real-orders.json"
 DEFAULTS = {
-    "profile_url": "https://www.tbank.ru/invest/social/profile/LinMath/",
+    "profile_url": "https://www.tbank-online.com/invest/social/profile/LinMath/",
     "poll_seconds": 30,
     "chat_id": "",
     "paused": False,
@@ -228,15 +228,19 @@ def load_settings() -> dict:
         return json.loads(json.dumps(DEFAULTS))
     data = json.loads(SETTINGS_PATH.read_text(encoding="utf-8"))
     settings = {**DEFAULTS, **{key: data[key] for key in DEFAULTS if key in data}}
+    # Existing installations may still have the .ru profile in .local.
+    # Navigate through the working mirror without deleting any saved settings.
+    settings["profile_url"] = canonical_profile_url(settings["profile_url"])
     settings["rules"] = validated_rules(settings["rules"])
     return settings
 
 
 def save_settings(data: dict) -> dict:
     url = str(data.get("profile_url", "")).strip()
-    parsed = urlparse(url)
-    if parsed.scheme != "https" or parsed.hostname not in {"tbank.ru", "www.tbank.ru"} or not parsed.path.startswith("/invest/"):
-        raise ValueError("Укажи ссылку на профиль Пульса на tbank.ru")
+    try:
+        url = canonical_profile_url(url)
+    except PulseError as error:
+        raise ValueError(str(error)) from error
     seconds = data.get("poll_seconds")
     if type(seconds) is not int or not 30 <= seconds <= 3600:
         raise ValueError("Интервал должен быть от 30 до 3600 секунд")
@@ -246,7 +250,6 @@ def save_settings(data: dict) -> dict:
     paused = data.get("paused")
     if type(paused) is not bool:
         raise ValueError("Некорректное значение паузы")
-    operations_url(url)
     enabled = data.get("monitoring_enabled")
     auto_buy = data.get("auto_demo_buy")
     if type(enabled) is not bool or type(auto_buy) is not bool:

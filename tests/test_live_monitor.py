@@ -13,7 +13,7 @@ from urllib.request import Request, urlopen
 from urllib.error import HTTPError
 
 import demo_admin
-from pulse_live import PulseBrowser, PulseError, is_operations_page, operations_url, with_cursor
+from pulse_live import PulseBrowser, PulseError, canonical_profile_url, is_operations_page, operations_url, with_cursor
 
 
 class FakeBrowser:
@@ -213,8 +213,8 @@ class LiveMonitorTests(unittest.TestCase):
                 return self.closed
 
         browser = PulseBrowser(Path("unused"))
-        login = Page("https://www.tbank.ru/auth/", closed=True)
-        trades = Page("https://www.tbank.ru/invest/pulse/profile/LinMath/operations/")
+        login = Page("https://id.tbank-online.com/auth/", closed=True)
+        trades = Page("https://www.tbank-online.com/invest/pulse/profile/LinMath/operations/")
         browser.page = login
         browser.context = type("Context", (), {"pages": [login, trades]})()
         self.assertTrue(browser.recover_page())
@@ -230,8 +230,8 @@ class LiveMonitorTests(unittest.TestCase):
                 return self.closed
 
         browser = PulseBrowser(Path("unused"), headless=False)
-        login = Page("https://id.tbank.ru/auth/step")
-        landing = Page("https://www.tbank.ru/invest/")
+        login = Page("https://id.tbank-online.com/auth/step")
+        landing = Page("https://www.tbank-online.com/invest/")
         browser.context = type("Context", (), {"pages": [landing, login]})()
         browser.page = landing
         profile = demo_admin.DEFAULTS["profile_url"]
@@ -245,7 +245,7 @@ class LiveMonitorTests(unittest.TestCase):
 
     def test_visible_trades_without_api_are_reloaded_without_login_prompt(self):
         class Page:
-            url = "https://www.tbank.ru/invest/pulse/profile/LinMath/operations/"
+            url = "https://www.tbank-online.com/invest/pulse/profile/LinMath/operations/"
 
             def is_closed(self):
                 return False
@@ -337,12 +337,14 @@ class LiveMonitorTests(unittest.TestCase):
             browser = PulseBrowser(Path(folder), headless=True)
             browser.context = type("Context", (), {"cookies": lambda self: [
                 {"name": "session", "value": "saved", "domain": ".tbank.ru", "path": "/", "expires": -1},
+                {"name": "mirror", "value": "saved", "domain": ".tbank-online.com", "path": "/", "expires": -1},
                 {"name": "other", "value": "discard", "domain": ".example.com", "path": "/", "expires": -1},
                 {"name": "lookalike", "value": "discard", "domain": ".nottbank.ru", "path": "/", "expires": -1},
+                {"name": "mirror-lookalike", "value": "discard", "domain": ".nottbank-online.com", "path": "/", "expires": -1},
             ]})()
             browser.save_session()
             saved = json.loads((Path(folder) / "pulse-session.json").read_text(encoding="utf-8"))
-            self.assertEqual([cookie["name"] for cookie in saved["cookies"]], ["session"])
+            self.assertEqual([cookie["name"] for cookie in saved["cookies"]], ["session", "mirror"])
             with patch("pulse_live.os.replace") as replace:
                 browser.save_session()
                 replace.assert_not_called()
@@ -455,6 +457,12 @@ class LiveMonitorTests(unittest.TestCase):
 
     def test_profile_and_cursor(self):
         self.assertEqual(operations_url("https://www.tbank.ru/invest/social/profile/LinMath/")[0], "LinMath")
+        self.assertEqual(operations_url("https://www.tbank-online.com/invest/social/profile/LinMath/")[1],
+                         "https://www.tbank-online.com/invest/pulse/profile/LinMath/operations/")
+        self.assertEqual(canonical_profile_url("https://www.tbank.ru/invest/social/profile/LinMath/"),
+                         demo_admin.DEFAULTS["profile_url"])
+        self.assertTrue(is_operations_page("https://www.tbank-online.com/invest/pulse/profile/LinMath/operations/",
+                                           demo_admin.DEFAULTS["profile_url"]))
         self.assertTrue(is_operations_page("https://www.tbank.ru/invest/social/profile/LinMath/operations?view=all",
                                            "https://www.tbank.ru/invest/social/profile/LinMath/"))
         self.assertFalse(is_operations_page("https://www.tbank.ru/invest/pulse/profile/Another/operations/",
@@ -463,6 +471,18 @@ class LiveMonitorTests(unittest.TestCase):
         self.assertIn("cursor=next", with_cursor("https://www.tbank.ru/example?sessionId=secret", "next", parameter="cursor"))
         with self.assertRaises(Exception):
             operations_url("https://example.com/invest/social/profile/LinMath/")
+
+    def test_saved_ru_profile_moves_to_com_mirror(self):
+        with tempfile.TemporaryDirectory() as folder, patch.object(
+                demo_admin, "SETTINGS_PATH", Path(folder) / "settings.json"):
+            old = {**demo_admin.DEFAULTS,
+                   "profile_url": "https://www.tbank.ru/invest/social/profile/LinMath/"}
+            Path(demo_admin.SETTINGS_PATH).write_text(json.dumps(old), encoding="utf-8")
+            self.assertEqual(demo_admin.load_settings()["profile_url"], demo_admin.DEFAULTS["profile_url"])
+            saved = demo_admin.save_settings(old)
+            self.assertEqual(saved["profile_url"], demo_admin.DEFAULTS["profile_url"])
+            self.assertEqual(json.loads(Path(demo_admin.SETTINGS_PATH).read_text(encoding="utf-8"))["profile_url"],
+                             demo_admin.DEFAULTS["profile_url"])
 
     def test_check_login_navigates_existing_tab_to_trades(self):
         class Page:
