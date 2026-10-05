@@ -152,7 +152,10 @@ class PulseBrowser:
         self.profile_name, url = operations_url(profile_url)
         self.opened_at = time.monotonic()
         self.profile_dir.mkdir(parents=True, exist_ok=True)
-        self.windows_before_open = set(visible_browser_windows()) if not self.headless else set()
+        try:
+            self.windows_before_open = set(visible_browser_windows()) if not self.headless else set()
+        except (AttributeError, OSError):
+            self.windows_before_open = set()
         self.playwright = sync_playwright().start()
         try:
             self.context = self.playwright.chromium.launch_persistent_context(
@@ -173,7 +176,10 @@ class PulseBrowser:
             self.page = self.context.pages[0] if self.context.pages else self.context.new_page()
             self.page.goto(url, wait_until="commit", timeout=45000)
             if not self.headless:
-                self.window_handles = set(visible_browser_windows()) - self.windows_before_open
+                try:
+                    self.window_handles = set(visible_browser_windows()) - self.windows_before_open
+                except (AttributeError, OSError):
+                    self.window_handles = set()
         except Exception:
             self.close()
             raise
@@ -182,12 +188,15 @@ class PulseBrowser:
         self.page.bring_to_front()
         if self.headless:
             return
-        windows = visible_browser_windows()
-        candidates = {hwnd: windows[hwnd] for hwnd in self.window_handles if hwnd in windows}
-        if not candidates:
-            candidates = {hwnd: area for hwnd, area in windows.items() if hwnd not in self.windows_before_open}
-        if candidates:
-            raise_browser_window(max(candidates, key=candidates.get))
+        try:
+            windows = visible_browser_windows()
+            candidates = {hwnd: windows[hwnd] for hwnd in self.window_handles if hwnd in windows}
+            if not candidates:
+                candidates = {hwnd: area for hwnd, area in windows.items() if hwnd not in self.windows_before_open}
+            if candidates:
+                raise_browser_window(max(candidates, key=candidates.get))
+        except (AttributeError, OSError):
+            pass  # The browser remains open even if Windows cannot raise its window.
 
     def save_session(self) -> None:
         """Keep session cookies in the ignored local profile for the next browser run."""

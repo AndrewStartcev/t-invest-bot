@@ -367,6 +367,48 @@ class LiveMonitorTests(unittest.TestCase):
                 server.server_close()
                 worker.join(timeout=2)
 
+    def test_failed_browser_open_reports_original_error(self):
+        class StopLoop(Exception):
+            pass
+
+        class Requests:
+            calls = 0
+
+            def get(self, **kwargs):
+                self.calls += 1
+                if self.calls == 1:
+                    return {"action": "auth_start"}
+                raise StopLoop
+
+        class FailedBrowser:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def open(self, profile_url):
+                raise RuntimeError("launch failed")
+
+        auth = {"status": "required", "message": ""}
+        with patch.object(demo_admin, "AUTH", auth), patch.object(demo_admin, "MONTH", {}), \
+                patch.object(demo_admin, "HISTORY_REQUESTS", Requests()), \
+                patch.object(demo_admin, "PulseBrowser", FailedBrowser):
+            with self.assertRaises(StopLoop):
+                demo_admin.monitor_loop()
+        self.assertEqual(auth["status"], "required")
+        self.assertEqual(auth["message"], "Окно Пульса не открылось: launch failed")
+
+    def test_window_raise_failure_does_not_close_browser(self):
+        class Page:
+            raised = False
+
+            def bring_to_front(self):
+                self.raised = True
+
+        browser = PulseBrowser(Path("unused"), headless=False)
+        browser.page = Page()
+        with patch("pulse_live.visible_browser_windows", side_effect=AttributeError("Win32 unavailable")):
+            browser.show()
+        self.assertTrue(browser.page.raised)
+
     def test_profile_and_cursor(self):
         self.assertEqual(operations_url("https://www.tbank.ru/invest/social/profile/LinMath/")[0], "LinMath")
         self.assertTrue(is_operations_page("https://www.tbank.ru/invest/social/profile/LinMath/operations?view=all",

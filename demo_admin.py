@@ -778,13 +778,13 @@ def monitor_loop() -> None:
         if request:
             try:
                 if request["action"] in {"auth_start", "show"}:
-                    if browser and browser.page.is_closed():
-                        browser.recover_page()
-                    if browser is None or browser.headless or browser.page.is_closed():
-                        if browser:
-                            browser.close()
-                        browser = PulseBrowser(ROOT / ".local" / "pulse-browser", headless=False)
-                        browser.open(settings["profile_url"])
+                    if browser is None or browser.headless or not browser.recover_page():
+                        previous_browser, browser = browser, None
+                        if previous_browser:
+                            previous_browser.close()
+                        new_browser = PulseBrowser(ROOT / ".local" / "pulse-browser", headless=False)
+                        new_browser.open(settings["profile_url"])
+                        browser = new_browser
                     browser.show()
                     next_poll = 0
                     with LOCK:
@@ -823,7 +823,8 @@ def monitor_loop() -> None:
                         MONTH.update(status="error", message=str(error) if isinstance(error, PulseError) else "История за месяц не загрузилась")
                 else:
                     with LOCK:
-                        AUTH.update(status="required", message=str(error) if isinstance(error, PulseError) else f"Окно Пульса не открылось ({type(error).__name__})")
+                        detail = str(error).splitlines()[0][:160] or type(error).__name__
+                        AUTH.update(status="required", message=str(error) if isinstance(error, PulseError) else f"Окно Пульса не открылось: {detail}")
             finally:
                 if "ready" in request:
                     request["ready"].set()
@@ -851,7 +852,7 @@ def monitor_loop() -> None:
 
         if browser and AUTH["status"] in {"waiting", "required"} and not browser.list_url:
             try:
-                if browser.page.is_closed() and not browser.recover_page():
+                if not browser.recover_page():
                     raise PulseError("Окно Пульса закрыто")
                 browser.page.wait_for_timeout(250)
                 if time.monotonic() >= next_ui_probe:
@@ -871,7 +872,11 @@ def monitor_loop() -> None:
                         next_poll = 0
                     next_ui_probe = time.monotonic() + 3
             except Exception as error:
-                if not browser.recover_page():
+                try:
+                    recovered = browser.recover_page()
+                except Exception:
+                    recovered = False
+                if not recovered:
                     with LOCK:
                         AUTH.update(status="required", message=f"Окно Пульса закрыто ({type(error).__name__})")
                     try:
