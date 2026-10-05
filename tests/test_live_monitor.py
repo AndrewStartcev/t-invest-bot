@@ -218,6 +218,44 @@ class LiveMonitorTests(unittest.TestCase):
         self.assertTrue(browser.recover_page())
         self.assertIs(browser.page, trades)
 
+    def test_login_return_opens_trades_automatically_once(self):
+        class Page:
+            def __init__(self, url):
+                self.url = url
+                self.closed = False
+
+            def is_closed(self):
+                return self.closed
+
+        browser = PulseBrowser(Path("unused"), headless=False)
+        login = Page("https://id.tbank.ru/auth/step")
+        landing = Page("https://www.tbank.ru/invest/")
+        browser.context = type("Context", (), {"pages": [landing, login]})()
+        browser.page = landing
+        profile = demo_admin.DEFAULTS["profile_url"]
+        with patch.object(browser, "refresh") as refresh:
+            self.assertFalse(browser.return_to_trades_after_login(profile))
+            self.assertTrue(browser.saw_login_page)
+            login.closed = True
+            self.assertTrue(browser.return_to_trades_after_login(profile))
+            refresh.assert_called_once_with(profile)
+            self.assertFalse(browser.return_to_trades_after_login(profile))
+
+    def test_visible_trades_without_api_are_reloaded_without_login_prompt(self):
+        class Page:
+            url = "https://www.tbank.ru/invest/pulse/profile/LinMath/operations/"
+
+            def is_closed(self):
+                return False
+
+        browser = PulseBrowser(Path("unused"), headless=False)
+        browser.page = Page()
+        browser.context = type("Context", (), {"pages": [browser.page]})()
+        browser.opened_at -= 10
+        with patch.object(browser, "visible_trades_page", return_value=True), patch.object(browser, "refresh") as refresh:
+            self.assertTrue(browser.return_to_trades_after_login(demo_admin.DEFAULTS["profile_url"]))
+            refresh.assert_called_once()
+
     def test_browser_read_error_keeps_visible_login_window(self):
         class VisibleBrowser:
             headless = False
@@ -259,6 +297,7 @@ class LiveMonitorTests(unittest.TestCase):
             self.assertFalse(demo_admin.handle_poll_error(
                 VisibleBrowser(), PulseError("Сделки не загрузились"), demo_admin.DEFAULTS["profile_url"]))
         self.assertEqual(auth["status"], "waiting")
+        self.assertIn("Вход в Пульс виден", auth["message"])
 
     def test_closed_headless_browser_keeps_saved_login_and_retries(self):
         class ClosedBrowser:

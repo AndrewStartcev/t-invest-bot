@@ -715,6 +715,12 @@ def handle_poll_error(browser: PulseBrowser, error: Exception, profile_url: str)
     login_needed = isinstance(error, PulseError) and any(
         marker in message for marker in ("Сделки не загрузились", "HTTP 401", "HTTP 403", "Заверши вход")
     )
+    if "Сделки не загрузились" in message and not browser.headless:
+        try:
+            if browser.visible_trades_page(profile_url):
+                message = "Вход в Пульс виден, но список сделок не ответил. Повторяем загрузку автоматически"
+        except Exception:
+            pass
     with LOCK:
         MONITOR.update(status="error", message=message)
         if login_needed:
@@ -822,6 +828,10 @@ def monitor_loop() -> None:
                 if "ready" in request:
                     request["ready"].set()
 
+        if browser is None and AUTH["status"] == "checking" and not (ROOT / ".local" / "pulse-browser").exists():
+            with LOCK:
+                AUTH.update(status="required", message="Первое подключение: нажми «Войти в Т-Банк»")
+
         if browser is None and AUTH["status"] in {"checking", "authenticated"} and time.monotonic() >= next_reconnect:
             try:
                 browser = PulseBrowser(ROOT / ".local" / "pulse-browser", headless=True)
@@ -845,9 +855,13 @@ def monitor_loop() -> None:
                     raise PulseError("Окно Пульса закрыто")
                 browser.page.wait_for_timeout(250)
                 if time.monotonic() >= next_ui_probe:
+                    if browser.return_to_trades_after_login(settings["profile_url"]):
+                        with LOCK:
+                            AUTH.update(status="waiting", message="Вход завершён, открываем сделки автора")
                     if browser.nickname_url and browser.instrument_urls:
                         browser.resolve_target()
                     if browser.list_url:
+                        browser.save_session()
                         with LOCK:
                             AUTH["message"] = "Сделки найдены, загружаем данные профиля"
                         next_poll = 0

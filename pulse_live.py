@@ -136,6 +136,10 @@ class PulseBrowser:
         self.observed_api = set()
         self.window_handles = set()
         self.windows_before_open = set()
+        self.saw_login_page = False
+        self.last_login_return = 0.0
+        self.login_return_attempts = 0
+        self.opened_at = time.monotonic()
 
     def open(self, profile_url: str) -> None:
         try:
@@ -146,6 +150,7 @@ class PulseBrowser:
         if not executable:
             raise PulseError("Brave, Edge или Chrome не найден. Задай PULSE_BROWSER_PATH")
         self.profile_name, url = operations_url(profile_url)
+        self.opened_at = time.monotonic()
         self.profile_dir.mkdir(parents=True, exist_ok=True)
         self.windows_before_open = set(visible_browser_windows()) if not self.headless else set()
         self.playwright = sync_playwright().start()
@@ -217,6 +222,35 @@ class PulseBrowser:
         if not pages:
             return False
         self.page = next((page for page in reversed(pages) if "/operations/" in page.url.split("?")[0]), pages[-1])
+        return True
+
+    def return_to_trades_after_login(self, profile_url: str) -> bool:
+        """Return from T-Bank's sign-in flow without asking for a manual check."""
+        if self.headless or not self.context or not self.recover_page():
+            return False
+        pages = [page for page in self.context.pages if not page.is_closed()]
+        login_open = any(urlparse(page.url).hostname == "id.tbank.ru"
+                         or urlparse(page.url).path == "/auth"
+                         or "/auth/" in urlparse(page.url).path for page in pages)
+        trades_visible = (time.monotonic() - self.opened_at >= 8
+                          and self.visible_trades_page(profile_url))
+        if login_open and not trades_visible:
+            self.saw_login_page = True
+            return False
+        if self.list_url:
+            return False
+        if trades_visible:
+            self.saw_login_page = True
+        if not self.saw_login_page:
+            return False
+        if not any(urlparse(page.url).hostname in {"tbank.ru", "www.tbank.ru"} for page in pages):
+            return False
+        now = time.monotonic()
+        if self.login_return_attempts >= 3 or now - self.last_login_return < 12:
+            return False
+        self.last_login_return = now
+        self.login_return_attempts += 1
+        self.refresh(profile_url)
         return True
 
     def visible_trades_page(self, profile_url: str) -> bool:

@@ -152,8 +152,8 @@
       <div class="auth-body">
         <span class="eyebrow">Доступ к данным</span>
         <h1 id="auth-title">Подключить Пульс</h1>
-        <p>В отдельном окне Т-Банка войди в аккаунт. Затем нажми «Проверить вход»: панель сама откроет сделки выбранного профиля в этом же окне.</p>
-        <button class="button wide" type="button" id="auth-button">Открыть окно Пульса</button>
+        <p>Войди в Т-Банк в открывшемся окне. После входа админка сама откроет сделки автора и запомнит сеанс на этом компьютере.</p>
+        <button class="button wide" type="button" id="auth-button">Войти в Т-Банк</button>
         <button class="button neutral wide" type="button" id="auth-show" hidden>Показать окно Пульса</button>
         <div class="auth-status"><span class="dot" id="auth-dot"></span><span id="auth-message">Проверяем сохранённый вход…</span></div>
       </div>
@@ -269,9 +269,9 @@
       el('auth-summary').textContent = ready ? 'Авторизован' : auth.status === 'waiting' ? 'Ожидаем входа' : auth.status === 'checking' || auth.status === 'opening' ? 'Проверяем' : 'Нужен вход';
       el('auth-message').textContent = auth.message || 'Ожидаем входа';
       el('auth-dot').className = 'dot' + (ready ? ' good' : auth.status === 'required' ? ' bad' : '');
-      el('auth-button').textContent = auth.status === 'waiting' ? 'Проверить вход' : auth.status === 'opening' ? 'Открываем окно…' : auth.status === 'checking' ? 'Проверяем сеанс…' : 'Открыть окно Пульса';
+      el('auth-button').textContent = auth.status === 'waiting' ? 'Показать окно Пульса' : auth.status === 'opening' ? 'Открываем окно…' : auth.status === 'checking' ? 'Восстанавливаем сеанс…' : 'Войти в Т-Банк';
       el('auth-button').disabled = auth.status === 'opening' || auth.status === 'checking';
-      el('auth-show').hidden = auth.status !== 'waiting';
+      el('auth-show').hidden = true;
     }
     function openConnectDialog() { authDismissed = false; renderAuth({status:authStatus,message:el('auth-message').textContent}); }
     el('auth-dismiss').addEventListener('click', () => { authDismissed = true; renderAuth({status:authStatus,message:el('auth-message').textContent}); });
@@ -280,8 +280,8 @@
       el('auth-button').disabled = true;
       try {
         if (authStatus === 'waiting') {
-          await api('/api/auth/check', {});
-          el('auth-message').textContent = 'Проверяем список сделок без открытия нового окна…';
+          await api('/api/browser/show', {});
+          el('auth-message').textContent = 'Заверши вход в окне Т-Банка; данные появятся автоматически.';
         } else {
           await api('/api/auth/start', {});
           el('auth-message').textContent = 'Открываем окно Пульса…';
