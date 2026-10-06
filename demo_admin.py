@@ -27,6 +27,10 @@ from pulse_live import PulseBrowser, PulseError, canonical_profile_url, operatio
 from pulse_replay import write_state
 from shared_pulse import RemotePulse, read_source
 from monitor_schedule import DEFAULT_SCHEDULE, schedule_open, validate_schedule
+from trade_policy import DEFAULT_POLICY, validate_policy, approval_reasons, plan_identity
+from trade_approvals import Approvals, fingerprint
+from telegram_router import run_router
+from short_simulation import simulate_with_short
 
 
 ROOT = Path(__file__).resolve().parent
@@ -51,6 +55,7 @@ DEFAULTS = {
     "real_mode": "off",
     "rules": DEFAULT_RULES,
     "schedule": DEFAULT_SCHEDULE,
+    "policy": DEFAULT_POLICY,
 }
 EVENTS: list[dict] = json.loads(EVENTS_PATH.read_text(encoding="utf-8")) if EVENTS_PATH.exists() else []
 POSITIONS: dict = json.loads(POSITIONS_PATH.read_text(encoding="utf-8")) if POSITIONS_PATH.exists() else {}
@@ -68,6 +73,7 @@ TRADING = {"status": "disconnected", "message": "Торговый токен н�
            "selected_account_id": ""}
 REAL_ORDERS: dict[str, dict] = json.loads(REAL_ORDERS_PATH.read_text(encoding="utf-8")) if REAL_ORDERS_PATH.exists() else {}
 PREVIEWS: dict[str, dict] = {}
+APPROVALS = Approvals(DATA_DIR)
 SCENARIOS = {
     "stock_buy": {"ticker": "DEMO-R", "classCode": "TQBR", "name": "Демо · акция", "asset_type": "stock",
                   "side": "buy", "price": 500, "lot_size": 1, "currency": "rub"},
@@ -268,6 +274,7 @@ def load_settings() -> dict:
     settings["profile_url"] = canonical_profile_url(settings["profile_url"])
     settings["rules"] = validated_rules(settings["rules"])
     settings["schedule"] = validate_schedule(settings["schedule"])
+    settings["policy"] = validate_policy(settings["policy"])
     return settings
 
 
@@ -301,13 +308,14 @@ def save_settings(data: dict) -> dict:
         raise ValueError("Сначала подключи торговый токен и выбери счёт")
     rules = validated_rules(data.get("rules", DEFAULT_RULES))
     schedule = validate_schedule(data.get("schedule", load_settings()["schedule"]))
+    policy = validate_policy(data.get("policy", load_settings()["policy"]))
     if "telegram_token" in data:
         if not isinstance(data["telegram_token"], str):
             raise ValueError("Некорректный токен Telegram")
         save_telegram_token(data["telegram_token"])
     settings = {"profile_url": url, "poll_seconds": seconds, "chat_id": chat_id, "paused": paused,
                 "monitoring_enabled": enabled, "auto_demo_buy": auto_buy, "real_mode": real_mode,
-                "rules": rules, "schedule": schedule}
+                "rules": rules, "schedule": schedule, "policy": policy}
     SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
     temp = SETTINGS_PATH.with_suffix(".tmp")
     temp.write_text(json.dumps(settings, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -325,7 +333,8 @@ def add_event(event: dict) -> None:
 def apply_demo(event: dict, signal: dict, settings: dict) -> None:
     """Apply a paper decision and persist its own portfolio. No broker calls."""
     with LOCK:
-        result, positions = simulate(signal, settings.get("rules", DEFAULT_RULES), POSITIONS)
+        result, positions = simulate_with_short(signal, settings.get("rules", DEFAULT_RULES), POSITIONS,
+                                                settings.get("policy", {}).get("short_simulation", False))
         if result["status"] == "executed":
             write_state(POSITIONS_PATH, positions)
             POSITIONS.clear()
@@ -337,12 +346,15 @@ def apply_demo(event: dict, signal: dict, settings: dict) -> None:
             if result["status"] == "executed" else "ДЕМО: пропущено"
 
 
-def notify(event: dict, settings: dict, message: str, *, urgent: bool = False) -> None:
+def notify(event: dict, settings: dict, message: str, *, urgent: bool = False, keyboard=None) -> None:
     if settings["paused"] and not urgent:
         event["notification"] = "пауза: отправки нет"
         return
     try:
-        result = send_notification(telegram_token(), settings["chat_id"], message)
+        if not settings.get("policy", {}).get("telegram_controls"):
+            keyboard = None
+        result = (send_notification(telegram_token(), settings["chat_id"], message, keyboard=keyboard)
+                  if keyboard is not None else send_notification(telegram_token(), settings["chat_id"], message))
         event["notification"] = {
             "skipped_no_chat_id": "не отправлено: ID не указан",
             "skipped_no_token": "не отправлено: токен не задан",
@@ -352,10 +364,146 @@ def notify(event: dict, settings: dict, message: str, *, urgent: bool = False) -
         event["notification"] = str(error)
 
 
+def queue_approval(event, signal, settings, source_key, reasons):
+    mode = "real" if settings["real_mode"] != "off" else "demo"
+    if mode == "real":
+        plan, token = prepare_real(signal, settings)
+    else:
+        with LOCK:
+            result, _ = simulate_with_short(signal, settings["rules"], POSITIONS, settings["policy"]["short_simulation"])
+            position_before = dict(POSITIONS.get(signal["ticker"] + ":" + signal["classCode"], {}))
+        if result["status"] != "executed":
+            raise ValueError(result["reason"])
+        plan, token = {"ticker": signal["ticker"], "side": signal["side"], "quantity": result["quantity"],
+                       "estimated_rub": result["amount_rub"], "price": str(signal.get("price", "")),
+                       "account_id": "demo", "instrument_uid": signal["ticker"] + ":" + signal["classCode"],
+                       "position_before": position_before}, ""
+    row = APPROVALS.create(signal, settings, plan, source_key, token, mode, reasons)
+    event.update(real_status="awaiting_approval" if mode == "real" else "demo_awaiting_approval",
+                 trade="Ожидает подтверждения в Telegram / панели", approval_id=row["id"],
+                 reason="; ".join(reasons), quantity=plan["quantity"], amount_rub=plan["estimated_rub"])
+    return row
+
+
+def approval_keyboard(row):
+    nonce = row["id"]
+    return [[{"text": "Подтвердить", "callback_data": "trade:approve:" + nonce},
+             {"text": "Отклонить", "callback_data": "trade:reject:" + nonce}],
+            [{"text": "Подтвердить и больше не спрашивать по активу", "callback_data": "trade:trust:" + nonce}]]
+
+
+def refresh_approval(nonce):
+    with TRADE_FLOW_LOCK:
+        original = APPROVALS.rows.get(nonce)
+        if not original or original["status"] in {"processing", "done", "rejected"}:
+            raise ValueError("Это решение нельзя подготовить повторно")
+        settings = load_settings()
+        current_mode = "real" if settings["real_mode"] != "off" else "demo"
+        if current_mode != original["mode"]:
+            raise ValueError("Режим торговли изменился; старый сигнал нельзя перенести между симуляцией и реальной торговлей")
+        if not settings["monitoring_enabled"] or not schedule_open(settings):
+            raise ValueError("Мониторинг выключен или вне расписания")
+        if original["mode"] == "real" and settings["real_mode"] == "off":
+            raise ValueError("Реальная торговля выключена")
+        if any(row["source_key"] == original["source_key"] for row in REAL_ORDERS.values()):
+            raise ValueError("Заявка уже отправлялась; нужна сверка с брокером")
+        APPROVALS.finish(nonce, "replaced")
+        event = {"time": datetime.now(timezone.utc).isoformat(), "source": "operator_refresh",
+                 "source_key": original["source_key"], "instrument": original["signal"]["ticker"],
+                 "profile": operations_url(settings["profile_url"])[0], "side": original["signal"]["side"], "price": "—"}
+        row = queue_approval(event, original["signal"], settings, original["source_key"], original["reasons"])
+        notify(event, settings, f"Новое подтверждение · {event['instrument']} · {event['side']}. "
+               f"{row['plan']['quantity']} лот(ов), цена {row['plan']['price']}, сумма/ГО {row['plan']['estimated_rub']} ₽. "
+               f"Счёт {row['plan']['account_id']}. Причина: {'; '.join(row['reasons'])}. "
+               "Подтвердить и больше не спрашивать разрешает следующие сделки актива по лимитам. Действует 5 минут.",
+               urgent=True, keyboard=approval_keyboard(row))
+        add_event(event)
+        return row["id"]
+
+
+def decide_approval(nonce, action):
+    if action not in {"approve", "reject", "trust"}:
+        raise ValueError("Неизвестное решение")
+    with TRADE_FLOW_LOCK:
+        settings = load_settings()
+        original = APPROVALS.rows.get(nonce)
+        if not original:
+            return {"matched": False, "message": "Подтверждение не найдено"}
+        token = trade_token() if original["mode"] == "real" else ""
+        row = APPROVALS.claim(nonce, action, settings, token)
+        event = {"time": datetime.now(timezone.utc).isoformat(), "source": "operator_decision",
+                 "source_key": row["source_key"], "profile": operations_url(settings["profile_url"])[0],
+                 "instrument": row["signal"]["ticker"], "side": row["signal"]["side"], "price": row["plan"]["price"]}
+        try:
+            if action == "reject":
+                event.update(trade="Оператор отклонил заявку", real_status="rejected_by_operator")
+            else:
+                if not settings["monitoring_enabled"] or not schedule_open(settings):
+                    raise ValueError("Мониторинг выключен или сейчас вне расписания")
+                if row["mode"] == "real":
+                    if settings["real_mode"] == "off" or AUTH["status"] != "authenticated":
+                        raise ValueError("Торговля или источник отключены")
+                    plan, token = prepare_real(row["signal"], settings)
+                    if plan_identity(plan) != plan_identity(row["plan"]):
+                        raise ValueError("Цена, счёт или количество изменились. Подготовь новое подтверждение в панели")
+                    if (time.time() >= row["expires"] or fingerprint(load_settings()) != row["fingerprint"]
+                            or token != trade_token()
+                            or hashlib.sha256(token.encode()).hexdigest() != row["token_hash"]
+                            or not schedule_open(settings) or AUTH["status"] != "authenticated"):
+                        raise ValueError("Подтверждение, расписание или источник изменились во время расчёта")
+                    order = place_real(plan, row["source_key"], token)
+                    event.update(trade="РЕАЛЬНО: заявка отправлена", real_status=order["status"],
+                                 quantity=plan["quantity"], amount_rub=plan["estimated_rub"])
+                else:
+                    with LOCK:
+                        current = POSITIONS.get(row["signal"]["ticker"] + ":" + row["signal"]["classCode"], {})
+                        if current != row["plan"].get("position_before", {}):
+                            raise ValueError("Условная позиция изменилась; подготовь новое решение")
+                        result, _ = simulate_with_short(row["signal"], settings["rules"], POSITIONS, settings["policy"]["short_simulation"])
+                        if result["status"] != "executed" or result["quantity"] != row["plan"]["quantity"]:
+                            raise ValueError("Условная позиция изменилась; подготовь новое решение")
+                        apply_demo(event, row["signal"], settings)
+                APPROVALS.finish(nonce, "done")
+                if action == "trust":
+                    APPROVALS.set_trusted(row["signal"], settings, row["plan"]["account_id"], True)
+                event["reason"] = "Решение оператора" + ("; актив разрешён без повторных вопросов" if action == "trust" else "")
+            with LOCK:
+                for source in EVENTS:
+                    if source.get("approval_id") == nonce:
+                        source.update(real_status=event.get("real_status", "processed"), trade=event["trade"])
+                write_state(EVENTS_PATH, EVENTS)
+            notify(event, settings, f"{event['instrument']} · {event['trade']}. {event.get('reason', '')}", urgent=True)
+            add_event(event)
+            return {"matched": True, "message": event["trade"]}
+        except (ValueError, TradeError) as error:
+            APPROVALS.finish(nonce, "failed")
+            event.update(trade="Заявка не отправлена / требует сверки", real_status="blocked", reason=str(error))
+            notify(event, settings, f"{event['instrument']} · {event['trade']}: {error}", urgent=True)
+            add_event(event)
+            raise
+
+
+def telegram_callback(query):
+    settings = load_settings()
+    message = query.get("message", {})
+    if (str(query.get("from", {}).get("id")) != settings["chat_id"]
+            or str(message.get("chat", {}).get("id")) != settings["chat_id"]
+            or message.get("chat", {}).get("type") != "private"):
+        return {"matched": False, "message": "Доступ отклонён"}
+    parts = str(query.get("data", "")).split(":")
+    if len(parts) != 3 or parts[0] != "trade" or parts[2] not in APPROVALS.rows:
+        return {"matched": False, "message": "Подтверждение не найдено"}
+    try:
+        return decide_approval(parts[2], parts[1])
+    except (ValueError, TradeError) as error:
+        return {"matched": True, "message": str(error)}
+
+
 def prepare_real(signal: dict, settings: dict) -> tuple[dict, str]:
     token, account_id = selected_trade_account()
     held = copied_lots(account_id, signal["ticker"], signal["classCode"], signal["side"])
-    return prepare_order(signal, settings["rules"], token, account_id, held), token
+    arguments = {"policy": settings["policy"]} if settings.get("policy", {}).get("position_cap_enabled") else {}
+    return prepare_order(signal, settings["rules"], token, account_id, held, **arguments), token
 
 
 def place_real(plan: dict, source_key: str, token: str) -> dict:
@@ -517,7 +665,7 @@ def confirm_real_preview(preview_id: str) -> dict:
         with TRADE_FLOW_LOCK:
             plan, token = prepare_real(signal, settings)
             original = preview["plan"]
-            if any(plan[key] != original[key] for key in ("account_id", "instrument_uid", "side", "quantity", "price")):
+            if plan_identity(plan) != plan_identity(original):
                 raise TradeError("Цена или доступное количество изменились; проверь заявку заново")
             order = place_real(plan, source_key, token)
     except TradeError as error:
@@ -655,6 +803,7 @@ def advance_month_scan(browser: PulseBrowser, scan: dict, batch_size: int = 1) -
 
 
 def poll_once(browser: PulseBrowser, settings: dict, *, emit_events: bool = True) -> None:
+    settings = {**DEFAULTS, **settings}
     state = json.loads(STATE_PATH.read_text(encoding="utf-8")) if STATE_PATH.exists() else {}
     profile, _ = operations_url(settings["profile_url"])
     previous = state.get(profile, {})
@@ -717,15 +866,32 @@ def poll_once(browser: PulseBrowser, settings: dict, *, emit_events: bool = True
             "source": "pulse", "source_key": source_key, "trade": "не выставлялась",
             "relative_yield": trade.get("relativeYield"),
         }
-        if settings.get("real_mode") == "confirm":
-            event.update(real_status="awaiting_approval", trade="Ожидает подтверждения",
-                         reason="Перед отправкой будут заново проверены цена, остаток и лимиты")
-        elif settings.get("real_mode") == "auto":
-            signal = {"ticker": item["ticker"], "classCode": item["classCode"],
-                      "asset_type": event["asset_type"], "side": side}
+        signal = {"ticker": item["ticker"], "classCode": item["classCode"], "name": item["showName"],
+                  "asset_type": event["asset_type"], "side": side, "price": trade.get("averagePrice"),
+                  "currency": trade.get("currency"), "relative_yield": trade.get("relativeYield"),
+                  "investor_position": item.get("investor_position", {"status": "unavailable"}),
+                  "lot_size": 1 if event["asset_type"] in {"stock", "bond", "fund"} else None}
+        event["investor_position"] = signal["investor_position"]
+        row = None
+        account = TRADE_ACCOUNT_PATH.read_text().strip() if settings["real_mode"] != "off" and TRADE_ACCOUNT_PATH.exists() else "demo"
+        trusted = APPROVALS.trusted(signal, settings, account)
+        reasons = approval_reasons(signal, settings["policy"])
+        needs_approval = not trusted and (settings["real_mode"] == "confirm" or bool(reasons))
+        trading = settings["real_mode"] != "off" or settings["auto_demo_buy"]
+        if needs_approval and trading:
+            try:
+                row = queue_approval(event, signal, settings, source_key, reasons or ["Режим подтверждения каждой заявки"])
+            except (TradeError, ValueError) as error:
+                event.update(real_status="blocked", trade="Пропущено: подтверждение не подготовлено", reason=str(error))
+        elif settings.get("real_mode") in {"auto", "confirm"}:
             try:
                 with TRADE_FLOW_LOCK:
+                    if fingerprint(load_settings()) != fingerprint(settings) or not schedule_open(settings):
+                        raise TradeError("Настройки или расписание изменились; автоматическая заявка отменена")
                     plan, token = prepare_real(signal, settings)
+                    if (fingerprint(load_settings()) != fingerprint(settings) or not schedule_open(settings)
+                            or token != trade_token() or AUTH["status"] != "authenticated"):
+                        raise TradeError("Настройки, токен, расписание или источник изменились во время расчёта")
                     placed = place_real(plan, source_key, token)
                 unit = "пунктов" if plan["price_type"] == "PRICE_TYPE_POINT" else "₽"
                 event.update(real_status=placed["status"], trade="РЕАЛЬНО: заявка отправлена",
@@ -751,7 +917,13 @@ def poll_once(browser: PulseBrowser, settings: dict, *, emit_events: bool = True
         message = f"Пульс · {profile} · {item['ticker']} · {'Покупка' if side == 'buy' else 'Продажа'} · {event['price']}. {event['trade']}. {event.get('reason', '')}"
         if settings.get("real_mode", "off") == "off":
             message += " Реальной заявки нет."
-        notify(event, settings, message, urgent=event.get("real_status") == "blocked")
+        if row:
+            message += (f"\nРасчёт: {row['plan']['quantity']} лот(ов), цена {row['plan']['price']}, "
+                        f"сумма/ГО {row['plan']['estimated_rub']} ₽. Счёт: {row['plan']['account_id']}."
+                        "\nРешение действует 5 минут. Перед отправкой цена и лимиты проверяются снова."
+                        "\nПоследняя кнопка подтверждает эту заявку и разрешает следующие сделки актива без вопросов; лимиты сохраняются.")
+        notify(event, settings, message, urgent=row is not None or event.get("real_status") == "blocked",
+               keyboard=approval_keyboard(row) if row else None)
         add_event(event)
 
 
@@ -1162,6 +1334,10 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(body)
             return
+        if self.path == "/_telegram/config" and os.environ.get("TINVEST_BACKEND_KEY"):
+            settings = load_settings()
+            self.respond(200, {"token": telegram_token() if settings["policy"]["telegram_controls"] else "", "chat_id": settings["chat_id"]})
+            return
         if self.path == "/":
             body = (ROOT / "demo" / "index.html").read_bytes()
             self.send_response(200)
@@ -1175,7 +1351,9 @@ class Handler(BaseHTTPRequestHandler):
         elif self.path == "/api/state":
             with LOCK:
                 authenticated = AUTH["status"] == "authenticated"
-                self.respond(200, {"settings": load_settings(), "token_configured": bool(telegram_token()),
+                self.respond(200, {"approvals": APPROVALS.public(), "asset_consents": list(APPROVALS.consents),
+                                   "investor_portfolio": {"status": "unavailable", "message": "Формат портфеля / коротких позиций автора ещё не подтверждён"},
+                                   "settings": load_settings(), "token_configured": bool(telegram_token()),
                                    "events": EVENTS, "demo_positions": POSITIONS,
                                    "broker_token_configured": bool(broker_token()), "broker": BROKER.copy(),
                                    "trade_token_configured": bool(trade_token()), "trading": TRADING.copy(),
@@ -1191,6 +1369,18 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         if not self.backend_authorized():
+            return
+        if self.path == "/_telegram/callback" and os.environ.get("TINVEST_BACKEND_KEY"):
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+                if not 0 < length <= 8192:
+                    raise ValueError("Размер callback")
+                query = json.loads(self.rfile.read(length))
+                if not isinstance(query, dict):
+                    raise ValueError("Формат callback")
+                self.respond(200, telegram_callback(query))
+            except (ValueError, TypeError):
+                self.respond(400, {"matched": False, "message": "Некорректный callback"})
             return
         if self.path == "/_source/read":
             if os.environ.get("TINVEST_WORKER_ROLE") != "source":
@@ -1246,7 +1436,7 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError("Нужен объект JSON")
             with LOCK:
                 authenticated = AUTH["status"] == "authenticated"
-            if not authenticated and self.path not in {"/api/auth/start", "/api/browser/show", "/api/auth/check", "/api/settings", "/api/auto-copy", "/api/demo", "/api/demo/scenario", "/api/demo/reset", "/api/telegram/test", "/api/broker/connect", "/api/broker/select", "/api/broker/refresh", "/api/trade/connect", "/api/trade/select", "/api/trade/preview", "/api/trade/submit", "/api/trade/reconcile"}:
+            if not authenticated and self.path not in {"/api/approval/decide", "/api/approval/refresh", "/api/asset/forget", "/api/auth/start", "/api/browser/show", "/api/auth/check", "/api/settings", "/api/auto-copy", "/api/demo", "/api/demo/scenario", "/api/demo/reset", "/api/telegram/test", "/api/broker/connect", "/api/broker/select", "/api/broker/refresh", "/api/trade/connect", "/api/trade/select", "/api/trade/preview", "/api/trade/submit", "/api/trade/reconcile"}:
                 self.respond(403, {"error": "Сначала авторизуйся в Пульсе"})
                 return
             if self.path == "/api/settings":
@@ -1287,6 +1477,16 @@ class Handler(BaseHTTPRequestHandler):
                 if not isinstance(candidate, str):
                     raise ValueError("Некорректный торговый токен")
                 self.respond(200, {"trading": connect_trading(candidate)})
+            elif self.path == "/api/approval/refresh":
+                self.respond(200, {"id": refresh_approval(str(data.get("id", "")))})
+            elif self.path == "/api/approval/decide":
+                self.respond(200, decide_approval(str(data.get("id", "")), data.get("action")))
+            elif self.path == "/api/asset/forget":
+                key = data.get("key")
+                with APPROVALS.lock:
+                    APPROVALS.consents.pop(key, None)
+                    write_state(APPROVALS.consents_path, APPROVALS.consents)
+                self.respond(200, {"ok": True})
             elif self.path == "/api/trade/select":
                 account_id = data.get("account_id")
                 if not isinstance(account_id, str):
@@ -1438,6 +1638,9 @@ def main() -> None:
     except OSError as error:
         raise SystemExit(f"Админка уже запущена на порту {args.port} или порт занят") from error
     role = os.environ.get("TINVEST_WORKER_ROLE", "")
+    if role not in {"source", "client"}:
+        threading.Thread(target=run_router, args=(lambda: [(None, {"token": telegram_token() if load_settings()["policy"]["telegram_controls"] else "", "chat_id": load_settings()["chat_id"]})],
+                         lambda _, query: telegram_callback(query), DATA_DIR / "telegram-router-state.json"), daemon=True).start()
     threading.Thread(target=remote_monitor_loop if role == "client" else monitor_loop,
                      name="pulse-monitor", daemon=True).start()
     if role != "source":

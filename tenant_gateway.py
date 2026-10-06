@@ -16,6 +16,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from client_accounts import Accounts
+from telegram_router import run_router
 from server_config import public_origin, source_key, validate_source_config
 
 ROOT = Path(__file__).resolve().parent
@@ -115,6 +116,28 @@ class Manager:
     def stop(self):
         for worker in [*self.workers.values(), self.source]:
             worker.stop()
+
+    def internal(self, worker, path, body=None):
+        connection = http.client.HTTPConnection("127.0.0.1", worker.port, timeout=30)
+        try:
+            connection.request("POST" if body is not None else "GET", path,
+                               json.dumps(body).encode() if body is not None else None,
+                               {"X-TInvest-Backend-Key": worker.key, "Content-Type": "application/json"})
+            response = connection.getresponse()
+            if response.status != 200:
+                raise RuntimeError("Клиентский обработчик недоступен")
+            return json.loads(response.read(256 * 1024))
+        finally:
+            connection.close()
+
+    def telegram_configs(self):
+        with self.lock:
+            workers = list(self.workers.values())
+        for worker in workers:
+            try:
+                yield worker, self.internal(worker, "/_telegram/config")
+            except (OSError, ValueError, RuntimeError, http.client.HTTPException):
+                continue
 
 
 class Gateway(BaseHTTPRequestHandler):
@@ -240,6 +263,9 @@ def main():
         raise
     server.manager = manager
     threading.Thread(target=manager.supervise, daemon=True).start()
+    threading.Thread(target=run_router, args=(manager.telegram_configs,
+                     lambda worker, query: manager.internal(worker, "/_telegram/callback", query),
+                     root / "telegram-router-state.json"), daemon=True).start()
     def shutdown(*_):
         manager.stop()
         raise SystemExit(0)

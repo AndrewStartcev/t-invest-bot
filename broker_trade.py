@@ -20,6 +20,7 @@ METHODS = {
     "book": "MarketDataService/GetOrderBook",
     "margin": "InstrumentsService/GetFuturesMargin",
     "positions": "OperationsService/GetPositions",
+    "portfolio": "OperationsService/GetPortfolio",
     "order_price": "OrdersService/GetOrderPrice",
     "max_lots": "OrdersService/GetMaxLots",
     "order_state": "OrdersService/GetOrderState",
@@ -117,7 +118,7 @@ def _positions(data: dict, kind: str, uid: str, account_id: str) -> tuple[Decima
 
 
 def prepare_order(signal: dict, rules: dict, token: str, account_id: str,
-                  copied_lots: int, call=api_call) -> dict:
+                  copied_lots: int, call=api_call, *, policy=None) -> dict:
     side, kind = signal.get("side"), signal.get("asset_type")
     if side not in {"buy", "sell"} or kind not in KINDS:
         raise TradeError("Направление или класс инструмента не поддерживается")
@@ -153,6 +154,8 @@ def prepare_order(signal: dict, rules: dict, token: str, account_id: str,
     quote = quotation(price)
     positions = call("positions", token, {"accountId": account_id})
     cash, available_units = _positions(positions, kind, uid, account_id)
+    if available_units < 0:
+        raise TradeError("На счёте короткая позиция: обычная покупка/продажа заблокирована до проверки сценария закрытия")
     if type(copied_lots) is not int or copied_lots < 0:
         raise TradeError("Повреждён учёт скопированных позиций")
     # No price: broker computes own-money limits from the current book. Bond
@@ -231,6 +234,20 @@ def prepare_order(signal: dict, rules: dict, token: str, account_id: str,
             quantity = min(broker_lots, budget_lots, position_lots, int(cash // unit_cost))
         if quantity < 1:
             raise TradeError("Недостаточно денег или исчерпан лимит позиции")
+        if policy and policy.get("position_cap_enabled"):
+            portfolio = call("portfolio", token, {"accountId": account_id, "currency": "RUB"})
+            if portfolio.get("accountId") and portfolio["accountId"] != account_id:
+                raise TradeError("Портфель относится к другому счёту")
+            total = portfolio.get("totalAmountPortfolio")
+            if not isinstance(total, dict) or str(total.get("currency", "")).lower() != "rub":
+                raise TradeError("Нет стоимости портфеля в рублях для процентного лимита")
+            equity = positive(money(total), "стоимость портфеля")
+            held_lots = max(0, available_units // lot, copied_lots)
+            cap_value = equity * Decimal(policy["position_percent"]) / 100
+            remaining_lots = int((cap_value - unit_cost * held_lots) // unit_cost)
+            quantity = min(quantity, remaining_lots)
+            if quantity < 1:
+                raise TradeError("Покупка превысит максимальную долю позиции в портфеле")
         amount = str(unit_cost * quantity)
     return {"account_id": account_id, "ticker": ticker, "class_code": code, "instrument_uid": uid,
             "asset_type": kind, "side": side, "lot_size": lot, "quantity": quantity,

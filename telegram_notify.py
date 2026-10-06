@@ -12,7 +12,7 @@ class NotificationError(Exception):
     pass
 
 
-def send_notification(token: str, chat_id: str, message: str, *, opener=urllib.request.urlopen) -> str:
+def send_notification(token: str, chat_id: str, message: str, *, opener=urllib.request.urlopen, keyboard=None) -> str:
     """Send to one private user. A missing chat ID never reaches the network."""
     recipient = str(chat_id or "").strip()
     if not recipient:
@@ -21,7 +21,10 @@ def send_notification(token: str, chat_id: str, message: str, *, opener=urllib.r
         raise ValueError("Telegram user ID must be a positive number")
     if not token:
         return "skipped_no_token"
-    payload = json.dumps({"chat_id": int(recipient), "text": message}).encode("utf-8")
+    values = {"chat_id": int(recipient), "text": message}
+    if keyboard is not None:
+        values["reply_markup"] = {"inline_keyboard": keyboard}
+    payload = json.dumps(values).encode("utf-8")
     request = urllib.request.Request(
         f"https://api.telegram.org/bot{token}/sendMessage",
         data=payload,
@@ -40,3 +43,20 @@ def send_notification(token: str, chat_id: str, message: str, *, opener=urllib.r
     if not isinstance(result, dict) or result.get("ok") is not True:
         raise NotificationError("Telegram did not confirm delivery")
     return "sent"
+
+
+def bot_call(token, method, values, *, opener=urllib.request.urlopen):
+    if method not in {"getUpdates", "answerCallbackQuery"}:
+        raise NotificationError("Неизвестный метод Telegram")
+    request = urllib.request.Request(f"https://api.telegram.org/bot{token}/{method}",
+                                    data=json.dumps(values).encode(), headers={"Content-Type": "application/json"})
+    try:
+        with opener(request, timeout=25) as response:
+            data = json.load(response)
+        if not isinstance(data, dict) or data.get("ok") is not True:
+            raise NotificationError("Telegram не подтвердил запрос")
+        return data.get("result")
+    except urllib.error.HTTPError as error:
+        raise NotificationError(f"Telegram HTTP {error.code}; проверь токен и отсутствие другого получателя обновлений") from None
+    except (urllib.error.URLError, TimeoutError, OSError, ValueError):
+        raise NotificationError("Telegram временно недоступен") from None
