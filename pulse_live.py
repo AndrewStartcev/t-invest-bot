@@ -334,7 +334,7 @@ class PulseBrowser:
         return self.list_url is not None
 
     def refresh(self, profile_url: str) -> None:
-        _, url = operations_url(profile_url)
+        self.profile_name, url = operations_url(profile_url)
         if not self.recover_page():
             self.page = self.context.new_page()
         self.list_url = None

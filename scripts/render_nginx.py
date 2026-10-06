@@ -10,7 +10,7 @@ def validate_domain(value):
     return value
 
 
-def render(domain, https=False, shared_source=False):
+def render(domain, https=False, shared_source=False, multi_user=False):
     domain = validate_domain(domain)
     http = f'''server {{
     listen 80;
@@ -25,6 +25,8 @@ def render(domain, https=False, shared_source=False):
     if not https:
         return http
     owner_auth = ('auth_basic "Pulse source owner";\n        auth_basic_user_file /etc/nginx/t-invest-source.htpasswd;' if shared_source else "")
+    client_auth = "/var/lib/t-invest-auth/clients.htpasswd" if multi_user else "/etc/nginx/t-invest-bot.htpasswd"
+    client_proxy = "include /etc/t-invest-bot/client-proxy.conf;" if multi_user else ""
     owner_location = '''
     location ^~ /source-admin {
         auth_basic "Pulse source owner";
@@ -45,7 +47,7 @@ server {{
     ssl_certificate_key /etc/letsencrypt/live/{domain}/privkey.pem;
     ssl_protocols TLSv1.2 TLSv1.3;
     auth_basic "T-Invest Bot";
-    auth_basic_user_file /etc/nginx/t-invest-bot.htpasswd;
+    auth_basic_user_file {client_auth};
     client_max_body_size 16k;
     add_header X-Content-Type-Options nosniff always;
     add_header X-Frame-Options DENY always;
@@ -71,6 +73,8 @@ server {{
         autoindex off;
     }}
     location / {{
+        {client_proxy}
+        proxy_set_header X-TInvest-User $remote_user;
         proxy_set_header X-TInvest-Source-Key "";
         proxy_pass http://127.0.0.1:8765;
         proxy_set_header Host $host;
@@ -88,6 +92,8 @@ if __name__ == "__main__":
     parser.add_argument("domain")
     parser.add_argument("--https", action="store_true")
     parser.add_argument("--shared-source", action="store_true")
+    parser.add_argument("--multi-user", action="store_true")
     args = parser.parse_args()
     shared = args.shared_source or Path("/etc/t-invest-bot/source-proxy.conf").exists()
-    print(render(args.domain, args.https, shared), end="")
+    multi = args.multi_user or Path("/etc/t-invest-bot/client-proxy.conf").exists()
+    print(render(args.domain, args.https, shared or multi, multi), end="")

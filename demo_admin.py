@@ -25,6 +25,7 @@ from telegram_notify import NotificationError, send_notification
 from server_config import public_origin, server_mode, shared_source, source_key, validate_source_config
 from pulse_live import PulseBrowser, PulseError, canonical_profile_url, operations_url
 from pulse_replay import write_state
+from shared_pulse import RemotePulse, read_source
 
 
 ROOT = Path(__file__).resolve().parent
@@ -784,6 +785,7 @@ def monitor_loop() -> None:
     next_ui_probe = 0.0
     next_reconnect = 0.0
     reconnect_delay = 3.0
+    source_cache = {}
     while True:
         settings = load_settings()
         profile = operations_url(settings["profile_url"])[0].casefold()
@@ -814,7 +816,23 @@ def monitor_loop() -> None:
             request = None
         if request:
             try:
-                if request["action"] in {"auth_start", "show"}:
+                if request["action"] == "source_read":
+                    if not browser or AUTH["status"] != "authenticated":
+                        raise PulseError("Общий источник не подключён; вход выполняет владелец")
+                    cache_key = json.dumps(request["payload"], sort_keys=True)
+                    cached = source_cache.get(cache_key)
+                    if cached and cached[0] > time.monotonic():
+                        request["result"] = cached[1]
+                    else:
+                        request["result"] = read_source(browser, request["payload"])
+                        browser.save_session()
+                        source_cache = {key: value for key, value in source_cache.items()
+                                        if value[0] > time.monotonic()}
+                        if len(source_cache) < 256:
+                            source_cache[cache_key] = (time.monotonic() + 5, request["result"])
+                    with LOCK:
+                        MONITOR.update(last_check=datetime.now(timezone.utc).isoformat(), status="running")
+                elif request["action"] in {"auth_start", "show"}:
                     if browser is None or browser.headless or not browser.recover_page():
                         previous_browser, browser = browser, None
                         if previous_browser:
@@ -852,7 +870,14 @@ def monitor_loop() -> None:
                 else:
                     request["error"] = "Сначала авторизуйся в Пульсе"
             except Exception as error:
-                if request["action"] == "history":
+                if request["action"] == "source_read":
+                    source_cache.clear()
+                    request["error"] = str(error) if isinstance(error, PulseError) else "Общий источник временно недоступен"
+                    if browser:
+                        if handle_poll_error(browser, error, request["payload"]["profile_url"]):
+                            browser.close()
+                            browser = None
+                elif request["action"] == "history":
                     request["error"] = str(error) if isinstance(error, PulseError) else "История не загрузилась"
                 elif request["action"] == "month":
                     month_scan = None
@@ -923,7 +948,8 @@ def monitor_loop() -> None:
                     browser = None
             continue
 
-        if browser and time.monotonic() >= next_poll:
+        if (browser and time.monotonic() >= next_poll
+                and not (os.environ.get("TINVEST_WORKER_ROLE") == "source" and AUTH["status"] == "authenticated")):
             try:
                 poll_once(browser, settings, emit_events=settings["monitoring_enabled"])
                 reconnect_delay = 3.0
@@ -956,6 +982,72 @@ def monitor_loop() -> None:
                 MONTH.update(status="error", items=[], message="Пульс отключился во время загрузки; попробуй снова")
 
 
+def remote_monitor_loop() -> None:
+    """Per-client decisions and watermarks; bank cookies never leave the source process."""
+    browser = None
+    profile = None
+    month_scan = None
+    next_poll = 0
+    while True:
+        settings = load_settings()
+        if settings["profile_url"] != profile:
+            profile = settings["profile_url"]
+            browser = RemotePulse(profile)
+            next_poll = 0
+            month_scan = None
+            with LOCK:
+                AUTH.update(status="checking", message="Проверяем общий источник")
+                TODAY.clear()
+                MONITOR.update(status="checking", instruments=[], profile="", last_check=None)
+                MONTH.update(status="idle", items=[], processed=0, total=0, message="", loaded_at=None)
+        try:
+            request = HISTORY_REQUESTS.get(timeout=0.1 if month_scan else 0.5)
+        except queue.Empty:
+            request = None
+        if request:
+            try:
+                if request["action"] == "history" and AUTH["status"] == "authenticated":
+                    request["result"] = browser.history(request["ticker"], request["class_code"], request["cursor"])
+                elif request["action"] == "month" and AUTH["status"] == "authenticated":
+                    cutoff = datetime.now(timezone.utc) - timedelta(days=30)
+                    targets = month_targets(MONITOR["instruments"], cutoff)
+                    MONTH.update(status="loading", items=[], processed=0, total=len(targets), skipped=[],
+                                 message="Читаем историю за 30 дней", loaded_at=None)
+                    month_scan = {"profile": operations_url(profile)[0], "cutoff": cutoff, "targets": targets,
+                                  "index": 0, "found": [], "cursor": None, "seen_cursors": set(),
+                                  "occurrences": {}, "pages": 0, "skipped": []}
+                else:
+                    request["error"] = "Общий источник не подключён"
+            except PulseError as error:
+                request["error"] = str(error)
+            finally:
+                if request["action"] == "month" and "error" in request:
+                    with LOCK:
+                        MONTH.update(status="error", message=request["error"])
+                if "ready" in request:
+                    request["ready"].set()
+        if time.monotonic() >= next_poll:
+            try:
+                poll_once(browser, settings, emit_events=settings["monitoring_enabled"])
+                if not settings["monitoring_enabled"]:
+                    MONITOR.update(status="stopped", message="Уведомления выключены; данные профиля обновлены")
+            except Exception as error:
+                message = str(error) if isinstance(error, PulseError) else "Ошибка чтения общего источника"
+                with LOCK:
+                    AUTH.update(status="required", message=message)
+                    MONITOR.update(status="error", message=message)
+            next_poll = time.monotonic() + settings["poll_seconds"]
+        if month_scan:
+            try:
+                if AUTH["status"] != "authenticated":
+                    raise PulseError("Источник отключился во время загрузки")
+                if advance_month_scan(browser, month_scan, batch_size=1):
+                    month_scan = None
+            except Exception:
+                month_scan = None
+                MONTH.update(status="error", items=[], message="История временно недоступна; попробуй снова")
+
+
 class LocalHTTPServer(ThreadingHTTPServer):
     allow_reuse_address = False
     allow_reuse_port = False
@@ -984,7 +1076,16 @@ class Handler(BaseHTTPRequestHandler):
         return (shared_source() and len(source_key()) >= 32
                 and hmac.compare_digest(self.headers.get("X-TInvest-Source-Key", "").encode("utf-8"), source_key().encode("utf-8")))
 
+    def backend_authorized(self) -> bool:
+        key = os.environ.get("TINVEST_BACKEND_KEY", "")
+        if key and not hmac.compare_digest(self.headers.get("X-TInvest-Backend-Key", "").encode(), key.encode()):
+            self.respond(403, {"error": "Доступ отклонён"})
+            return False
+        return True
+
     def do_GET(self) -> None:
+        if not self.backend_authorized():
+            return
         if self.path.startswith("/source-admin"):
             if not self.source_authorized():
                 self.respond(403, {"error": "Доступ только владельцу источника"})
@@ -1048,6 +1149,31 @@ class Handler(BaseHTTPRequestHandler):
             self.respond(404, {"error": "Не найдено"})
 
     def do_POST(self) -> None:
+        if not self.backend_authorized():
+            return
+        if self.path == "/_source/read":
+            if os.environ.get("TINVEST_WORKER_ROLE") != "source":
+                self.respond(404, {"error": "Не найдено"})
+                return
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+                if not 0 < length <= 256 * 1024:
+                    raise ValueError("Некорректный запрос источника")
+                data = json.loads(self.rfile.read(length))
+                if not isinstance(data, dict) or data.get("action") not in {"snapshot", "history"}:
+                    raise ValueError("Неизвестное действие источника")
+                data["profile_url"] = canonical_profile_url(data.get("profile_url"))
+                request = {"action": "source_read", "payload": data, "ready": threading.Event()}
+                HISTORY_REQUESTS.put(request)
+                if not request["ready"].wait(55):
+                    self.respond(503, {"error": "Источник занят; повторим проверку"})
+                elif "error" in request:
+                    self.respond(503, {"error": request["error"]})
+                else:
+                    self.respond(200, request["result"])
+            except (ValueError, TypeError, PulseError):
+                self.respond(400, {"error": "Некорректный запрос источника"})
+            return
         owner_routes = {"/source-admin/api/start": "/api/auth/start",
                         "/source-admin/api/show": "/api/browser/show",
                         "/source-admin/api/check": "/api/auth/check"}
@@ -1270,9 +1396,14 @@ def main() -> None:
         server = LocalHTTPServer(("127.0.0.1", args.port), Handler)
     except OSError as error:
         raise SystemExit(f"Админка уже запущена на порту {args.port} или порт занят") from error
-    threading.Thread(target=monitor_loop, name="pulse-monitor", daemon=True).start()
-    threading.Thread(target=reconcile_loop, name="broker-reconcile", daemon=True).start()
-    threading.Thread(target=broker_monitor_loop, name="broker-portfolio", daemon=True).start()
+    role = os.environ.get("TINVEST_WORKER_ROLE", "")
+    threading.Thread(target=remote_monitor_loop if role == "client" else monitor_loop,
+                     name="pulse-monitor", daemon=True).start()
+    if role != "source":
+        threading.Thread(target=reconcile_loop, name="broker-reconcile", daemon=True).start()
+        threading.Thread(target=broker_monitor_loop, name="broker-portfolio", daemon=True).start()
+    if os.environ.get("TINVEST_READY_FILE"):
+        write_state(Path(os.environ["TINVEST_READY_FILE"]), {"port": server.server_port, "pid": os.getpid()})
     print(f"Админка: http://127.0.0.1:{server.server_port}/")
     server.serve_forever()
 
