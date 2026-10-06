@@ -244,6 +244,7 @@
   <script>
     const el = id => document.getElementById(id);
     let instruments = [], today = [], month = {status:'idle',items:[]}, monthView = false, events = [], realOrders = [], selected = null, historyCursor = null, tokenConfigured = false, authStatus = 'checking', authDismissed = false, instrumentLimit = 60, autoCopyEnabled = false, realMode = 'off', currentPreview = null;
+    let serverBrowserUrl = null, pulseWindow = null, popupBlocked = false;
     const tabs = [...document.querySelectorAll('[data-view]')];
     const pages = [...document.querySelectorAll('.view')];
     const names = {overview:'Обзор',settings:'Настройки',journal:'Журнал'};
@@ -271,6 +272,7 @@
       el('open-pulse').hidden = ready;
       el('auth-summary').textContent = ready ? 'Авторизован' : auth.status === 'waiting' ? 'Ожидаем входа' : auth.status === 'checking' || auth.status === 'opening' ? 'Проверяем' : 'Нужен вход';
       el('auth-message').textContent = auth.message || 'Ожидаем входа';
+      if (popupBlocked && !ready) el('auth-message').textContent += ' Разреши всплывающее окно или нажми «Открыть серверный браузер».';
       el('auth-dot').className = 'dot' + (ready ? ' good' : auth.status === 'required' ? ' bad' : '');
       el('auth-button').textContent = auth.status === 'waiting' ? 'Показать окно Пульса' : auth.status === 'opening' ? 'Открываем окно…' : auth.status === 'checking' ? 'Восстанавливаем сеанс…' : 'Войти в Т-Банк';
       el('auth-button').disabled = auth.status === 'opening' || auth.status === 'checking';
@@ -279,16 +281,27 @@
     function openConnectDialog() { authDismissed = false; renderAuth({status:authStatus,message:el('auth-message').textContent}); }
     el('auth-dismiss').addEventListener('click', () => { authDismissed = true; renderAuth({status:authStatus,message:el('auth-message').textContent}); });
     el('connect-pulse').addEventListener('click', openConnectDialog);
+    function openServerBrowser() {
+      if (!serverBrowserUrl) return true;
+      if (pulseWindow && !pulseWindow.closed) { pulseWindow.focus(); return true; }
+      pulseWindow = window.open(serverBrowserUrl, 't-invest-pulse', 'popup,width=1440,height=1000,resizable=yes,scrollbars=yes');
+      if (pulseWindow) { pulseWindow.opener = null; return true; }
+      return false;
+    }
     async function startAuth() {
+      // Open during the click, before any await, so popup blockers allow it.
+      const windowOpened = openServerBrowser();
+      popupBlocked = !windowOpened;
       el('auth-button').disabled = true;
       try {
         if (authStatus === 'waiting') {
           await api('/api/browser/show', {});
-          el('auth-message').textContent = 'Заверши вход в окне Т-Банка; данные появятся автоматически.';
         } else {
           await api('/api/auth/start', {});
-          el('auth-message').textContent = el('server-browser-auth').hidden?'Открываем окно Пульса…':'Открываем Пульс на сервере. Перейди в серверный браузер и заверши вход.';
         }
+        el('auth-message').textContent = windowOpened
+          ? 'Заверши вход в открывшемся окне Т-Банка; данные появятся автоматически.'
+          : 'Браузер заблокировал всплывающее окно. Разреши его для этого сайта или нажми «Открыть серверный браузер».';
       }
       catch (error) { el('auth-message').textContent = error.message; }
       finally { el('auth-button').disabled = false; }
@@ -436,7 +449,8 @@
     function renderState(state){
       renderAuth(state.auth);instruments=state.monitor.instruments||[];today=state.today||[];month=state.month||{status:'idle',items:[]};events=state.events||[];realOrders=state.real_orders||[];realMode=state.settings.real_mode||'off';
       for(const id of ['server-browser-auth','server-browser-top']){const link=el(id);link.hidden=!state.server_mode;if(state.server_mode)link.href=state.browser_ui_url;}
-      if(state.server_mode){el('auth-instructions').textContent='Нажми «Войти в Т-Банк», затем открой серверный браузер и заверши вход в нём. Сеанс сохранится на сервере; эту вкладку после входа можно закрыть.';el('panel-location').textContent='Серверная панель · мониторинг работает на сервере';}
+      serverBrowserUrl=state.server_mode?state.browser_ui_url:null;
+      if(state.server_mode){el('auth-instructions').textContent='Нажми «Войти в Т-Банк»: окно банка откроется у тебя в браузере. Заверши вход; сеанс сохранится на сервере. После входа это окно можно закрыть.';el('panel-location').textContent='Серверная панель · мониторинг работает на сервере';}
       renderBroker(state);renderTrading(state);
       const profile=new URL(state.settings.profile_url).pathname.split('/').filter(Boolean).at(-1);
       el('profile-heading').textContent=profile+' · профиль Пульса';el('source-profile').textContent=profile;

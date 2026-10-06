@@ -37,8 +37,8 @@ server {{
     add_header X-Frame-Options DENY always;
     add_header Referrer-Policy no-referrer always;
 
-    location /desktop/ {{
-        proxy_pass http://127.0.0.1:6080/;
+    location = /desktop/websockify {{
+        proxy_pass http://127.0.0.1:6080/websockify;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";
@@ -46,6 +46,12 @@ server {{
         proxy_set_header Authorization "";
         proxy_read_timeout 3600s;
         proxy_buffering off;
+    }}
+    location /desktop/ {{
+        alias /usr/share/novnc/;
+        index vnc.html;
+        include /etc/nginx/mime.types;
+        autoindex off;
     }}
     location / {{
         proxy_pass http://127.0.0.1:8765;

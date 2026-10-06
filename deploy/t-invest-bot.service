@@ -10,6 +10,9 @@ User=t-invest-bot
 Group=t-invest-bot
 WorkingDirectory=/opt/t-invest-bot
 EnvironmentFile=/etc/t-invest-bot/server.env
+RuntimeDirectory=t-invest-bot
+RuntimeDirectoryMode=0700
+Environment=TMPDIR=/run/t-invest-bot
 ExecStart=/opt/t-invest-bot/.venv/bin/python -u /opt/t-invest-bot/demo_admin.py --port 8765
 Restart=on-failure
 RestartSec=5
@@ -19,7 +22,7 @@ UMask=0077
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/var/lib/t-invest-bot
+ReadWritePaths=/var/lib/t-invest-bot /run/t-invest-bot
 
 [Install]
 WantedBy=multi-user.target
