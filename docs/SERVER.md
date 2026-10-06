@@ -72,6 +72,8 @@ sudo certbot renew --dry-run
 
 Chromium и Playwright создают временные файлы в `TMPDIR=/run/t-invest-bot`: этот каталог создаёт systemd с правами 0700 и удаляет при остановке сервиса. `ProtectSystem=strict` сохраняется. `/tmp/.X11-unix` остаётся видимым для подключения к Xvfb. Статические файлы noVNC отдаёт nginx с MIME-типами; только WebSocket `/desktop/websockify` проксируется через websockify.
 
+Сервис VNC ожидает запуска Openbox, перед подключением задаёт раскладку `us` через `setxkbmap` и использует XKB для передачи клавиш. Клавиатура, мышь и буфер обмена явно разрешены (`-input KMBC`); настройки из внешнего rc-файла не загружаются. Ссылка noVNC отключает сохранённый режим «только просмотр». Если клавиши всё ещё не передаются, проверь `systemctl status t-invest-window-manager t-invest-vnc` и `journalctl -u t-invest-vnc -n 50 --no-pager`; работоспособность ввода нужно подтвердить в окне на устройстве клиента.
+
 ## 5. Подключить API-токены
 
 Выпускай токены на `https://www.tbank.ru/invest/settings/api/`.

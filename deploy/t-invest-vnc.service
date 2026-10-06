@@ -1,12 +1,13 @@
 [Unit]
 Description=T-Invest loopback-only browser desktop
-Requires=t-invest-display.service
-After=t-invest-display.service
+Requires=t-invest-display.service t-invest-window-manager.service
+After=t-invest-display.service t-invest-window-manager.service
 
 [Service]
 User=t-invest-bot
 Group=t-invest-bot
-ExecStart=/usr/bin/x11vnc -display :99 -localhost -rfbport 5901 -forever -shared -nopw -noxdamage
+ExecStartPre=/usr/bin/setxkbmap -display :99 -layout us
+ExecStart=/usr/bin/x11vnc -norc -display :99 -localhost -rfbport 5901 -forever -shared -nopw -noxdamage -xkb -input KMBC
 Restart=on-failure
 RestartSec=3
 UMask=0077

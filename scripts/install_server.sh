@@ -17,7 +17,7 @@ if [[ -f /etc/t-invest-bot/server.env ]] && ! grep -Fxq "TINVEST_PUBLIC_ORIGIN=h
 fi
 apt-get update
 apt-get install -y python3 python3-venv git nginx apache2-utils ca-certificates \
-    xvfb x11vnc openbox novnc websockify x11-utils certbot python3-certbot-nginx
+    xvfb x11vnc openbox novnc websockify x11-utils x11-xkb-utils certbot python3-certbot-nginx
 update-ca-certificates
 if ! id t-invest-bot >/dev/null 2>&1; then
     useradd --system --user-group --home-dir /var/lib/t-invest-bot --shell /usr/sbin/nologin t-invest-bot

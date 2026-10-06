@@ -999,7 +999,7 @@ class Handler(BaseHTTPRequestHandler):
                                    "real_orders": list(REAL_ORDERS.values())[-30:], "real_order_count": len(REAL_ORDERS),
                                    "monitor": MONITOR if authenticated else {"status": "stopped", "message": "Ожидаем входа в Пульс", "last_check": None, "profile": "", "instrument_count": 0, "instruments": []},
                                    "auth": AUTH, "server_mode": server_mode(),
-                                   "browser_ui_url": "/desktop/vnc.html?autoconnect=1&resize=scale&path=desktop/websockify" if server_mode() else None,
+                                   "browser_ui_url": "/desktop/vnc.html?autoconnect=1&resize=scale&path=desktop/websockify&view_only=false" if server_mode() else None,
                                    "today": TODAY if authenticated else [],
                                    "month": MONTH.copy() if authenticated else {"status": "idle", "items": [], "processed": 0, "total": 0, "message": "", "loaded_at": None}})
         else:
