@@ -421,6 +421,12 @@ class PulseBrowser:
             })
         return name, instruments
 
+    def portfolio(self, profile_url, instruments=None):
+        from investor_portfolio import read_visible_portfolio
+        if instruments is None:
+            _, instruments = self.snapshot(profile_url, {})
+        return read_visible_portfolio(self, canonical_profile_url(profile_url), instruments)
+
     def history(self, ticker: str, class_code: str, cursor: str | int | None = None) -> dict:
         def valid_component(value: str) -> bool:
             return (isinstance(value, str) and 0 < len(value) <= 128 and value not in {".", ".."}

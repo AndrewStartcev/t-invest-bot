@@ -40,6 +40,10 @@ class RemotePulse:
     def history(self, ticker, class_code, cursor=None):
         return self.call("history", ticker=ticker, class_code=class_code, cursor=cursor)
 
+    def portfolio(self, profile_url, instruments=None):
+        self.profile_url = canonical_profile_url(profile_url)
+        return self.call("portfolio")
+
 
 def read_source(browser, request):
     profile_url = canonical_profile_url(request["profile_url"])
@@ -54,6 +58,8 @@ def read_source(browser, request):
             raise PulseError("Некорректные счётчики источника")
         name, instruments = browser.snapshot(profile_url, counts)
         return {"profile": name, "instruments": instruments}
+    if request["action"] == "portfolio":
+        return browser.portfolio(profile_url)
     if request["action"] == "history":
         if not browser.list_url:
             browser.snapshot(profile_url, {})

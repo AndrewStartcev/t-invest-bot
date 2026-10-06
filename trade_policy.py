@@ -37,7 +37,8 @@ def approval_reasons(signal, policy):
         if not isinstance(position, dict) or position.get("status") != "verified":
             reasons.append("Позиция инвестора неизвестна; покупка может закрывать короткую позицию")
         elif position.get("present") is not False:
-            reasons.append("Актив уже есть в портфеле инвестора")
+            detail = f"; видимая доля {position['percent']}%" if position.get("percent") is not None else ""
+            reasons.append("Актив уже есть в портфеле инвестора" + detail)
     if policy["confirm_low_profit"]:
         # BUY can close a short: only a verified empty position is an ordinary opening.
         closing = (signal["side"] == "sell" or not isinstance(position, dict)

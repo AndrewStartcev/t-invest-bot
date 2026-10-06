@@ -26,6 +26,7 @@ from server_config import public_origin, server_mode, shared_source, source_key,
 from pulse_live import PulseBrowser, PulseError, canonical_profile_url, operations_url
 from pulse_replay import write_state
 from shared_pulse import RemotePulse, read_source
+from investor_portfolio import unavailable as portfolio_unavailable
 from monitor_schedule import DEFAULT_SCHEDULE, schedule_open, validate_schedule
 from trade_policy import DEFAULT_POLICY, validate_policy, approval_reasons, plan_identity
 from trade_approvals import Approvals, fingerprint
@@ -66,6 +67,7 @@ HISTORY_REQUESTS = queue.Queue()
 MONITOR = {"status": "stopped", "message": "Мониторинг выключен", "last_check": None, "profile": "", "instrument_count": 0, "instruments": []}
 AUTH = {"status": "checking", "message": "Проверяем сохранённый вход в Пульс"}
 TODAY: list[dict] = []
+INVESTOR_PORTFOLIO = {"status": "unavailable", "profile_url": "", "message": "Портфель автора ещё не проверен", "positions": {}, "rows": []}
 MONTH = {"status": "idle", "items": [], "processed": 0, "total": 0, "message": "", "loaded_at": None}
 BROKER = {"status": "disconnected", "message": "Подключи токен T-Invest только для чтения", "accounts": [],
           "selected_account_id": "", "snapshot": None, "last_check": None}
@@ -808,6 +810,21 @@ def poll_once(browser: PulseBrowser, settings: dict, *, emit_events: bool = True
     profile, _ = operations_url(settings["profile_url"])
     previous = state.get(profile, {})
     profile, instruments = browser.snapshot(settings["profile_url"], previous)
+    portfolio = portfolio_unavailable(settings["profile_url"], "Проверка портфеля автора выключена")
+    if settings["policy"]["enabled"]:
+        try:
+            portfolio = browser.portfolio(settings["profile_url"], instruments)
+            if (not isinstance(portfolio, dict) or portfolio.get("profile_url") != canonical_profile_url(settings["profile_url"])
+                    or not isinstance(portfolio.get("positions"), dict)):
+                portfolio = portfolio_unavailable(settings["profile_url"])
+        except Exception:
+            portfolio = portfolio_unavailable(settings["profile_url"])
+    with LOCK:
+        INVESTOR_PORTFOLIO.clear()
+        INVESTOR_PORTFOLIO.update(portfolio)
+    for item in instruments:
+        item["investor_position"] = portfolio.get("positions", {}).get(item["ticker"] + ":" + item["classCode"],
+            {"status": "unavailable", "profile_url": settings["profile_url"], "checked_at": portfolio.get("checked_at")})
     session_warning = False
     if isinstance(browser, PulseBrowser):
         try:
@@ -1352,7 +1369,8 @@ class Handler(BaseHTTPRequestHandler):
             with LOCK:
                 authenticated = AUTH["status"] == "authenticated"
                 self.respond(200, {"approvals": APPROVALS.public(), "asset_consents": list(APPROVALS.consents),
-                                   "investor_portfolio": {"status": "unavailable", "message": "Формат портфеля / коротких позиций автора ещё не подтверждён"},
+                                   "investor_portfolio": (INVESTOR_PORTFOLIO.copy() if authenticated and INVESTOR_PORTFOLIO.get("profile_url") == load_settings()["profile_url"]
+                                                          else portfolio_unavailable(load_settings()["profile_url"], "Портфель выбранного автора ещё не проверен")),
                                    "settings": load_settings(), "token_configured": bool(telegram_token()),
                                    "events": EVENTS, "demo_positions": POSITIONS,
                                    "broker_token_configured": bool(broker_token()), "broker": BROKER.copy(),
@@ -1391,7 +1409,7 @@ class Handler(BaseHTTPRequestHandler):
                 if not 0 < length <= 256 * 1024:
                     raise ValueError("Некорректный запрос источника")
                 data = json.loads(self.rfile.read(length))
-                if not isinstance(data, dict) or data.get("action") not in {"snapshot", "history"}:
+                if not isinstance(data, dict) or data.get("action") not in {"snapshot", "history", "portfolio"}:
                     raise ValueError("Неизвестное действие источника")
                 data["profile_url"] = canonical_profile_url(data.get("profile_url"))
                 request = {"action": "source_read", "payload": data, "ready": threading.Event()}
