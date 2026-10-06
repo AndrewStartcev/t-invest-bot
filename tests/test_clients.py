@@ -24,6 +24,12 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class ClientTests(unittest.TestCase):
+    def test_client_hasher_rejects_reserved_source_owner_login(self):
+        with patch('client_accounts.subprocess.run') as run:
+            with self.assertRaises(ValueError):
+                hash_password('source-owner', 'owner-password-long')
+        run.assert_not_called()
+
     def test_password_hashing_does_not_put_the_password_in_process_arguments(self):
         secret = 'test-password-only-for-fixture'
         result = SimpleNamespace(returncode=0, stdout='client1:$2y$12$' + 'a' * 53 + '\n')
@@ -55,8 +61,6 @@ class ClientTests(unittest.TestCase):
             proxy.write_text('proxy_set_header X-TInvest-Gateway-Key "trusted-fixture-key";\n')
             source_proxy = root / 'source-proxy'
             source_proxy.write_text('proxy_set_header X-TInvest-Source-Key "source-fixture-key";\n')
-            echo = ThreadingHTTPServer(('127.0.0.1', 0), Echo)
-            threading.Thread(target=echo.serve_forever, daemon=True).start()
             ports = []
             for _ in range(2):
                 with socket.socket() as sock:
@@ -67,9 +71,13 @@ class ClientTests(unittest.TestCase):
             config = '\n'.join(line for line in config.splitlines() if not line.strip().startswith('ssl_'))
             config = config.replace('/var/lib/t-invest-auth/clients.htpasswd', str(auth))
             config = config.replace('/etc/nginx/t-invest-source.htpasswd', str(root / 'owner-auth'))
-            (root / 'owner-auth').write_text(hash_password('source-owner', 'owner-password-long') + '\n')
+            # Owner Basic Auth is independent of the client account registry.
+            owner_hash = hash_password('ownerfixture', 'owner-password-long').split(':', 1)[1]
+            (root / 'owner-auth').write_text('source-owner:' + owner_hash + '\n')
             config = config.replace('/etc/t-invest-bot/client-proxy.conf', str(proxy))
             config = config.replace('/etc/t-invest-bot/source-proxy.conf', str(source_proxy))
+            echo = ThreadingHTTPServer(('127.0.0.1', 0), Echo)
+            threading.Thread(target=echo.serve_forever, daemon=True).start()
             config = config.replace('http://127.0.0.1:8765', f'http://127.0.0.1:{echo.server_port}')
             path = root / 'nginx.conf'
             path.write_text(f'pid {root}/pid; error_log {root}/error.log; events {{}} http {{ access_log off; {config} }}')
