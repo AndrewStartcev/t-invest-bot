@@ -1,0 +1,17 @@
+[Unit]
+Description=T-Invest virtual browser display
+
+[Service]
+Type=simple
+User=t-invest-bot
+Group=t-invest-bot
+ExecStart=/usr/bin/Xvfb :99 -screen 0 1440x1000x24 -nolisten tcp -noreset
+ExecStartPost=/usr/bin/timeout 15 /bin/sh -c 'until /usr/bin/xdpyinfo -display :99 >/dev/null 2>&1; do sleep 0.2; done'
+Restart=on-failure
+RestartSec=3
+UMask=0077
+NoNewPrivileges=true
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

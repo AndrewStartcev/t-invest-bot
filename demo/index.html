@@ -152,8 +152,9 @@
       <div class="auth-body">
         <span class="eyebrow">Доступ к данным</span>
         <h1 id="auth-title">Подключить Пульс</h1>
-        <p>Войди в Т-Банк в открывшемся окне. После входа админка сама откроет сделки автора и запомнит сеанс на этом компьютере.</p>
+        <p id="auth-instructions">Войди в Т-Банк в открывшемся окне. После входа админка сама откроет сделки автора и запомнит сеанс на этом компьютере.</p>
         <button class="button wide" type="button" id="auth-button">Войти в Т-Банк</button>
+        <a class="button neutral wide" id="server-browser-auth" target="_blank" rel="noopener noreferrer" hidden>Открыть серверный браузер</a>
         <button class="button neutral wide" type="button" id="auth-show" hidden>Показать окно Пульса</button>
         <div class="auth-status"><span class="dot" id="auth-dot"></span><span id="auth-message">Проверяем сохранённый вход…</span></div>
       </div>
@@ -173,10 +174,10 @@
         <button type="button" data-view="settings"><span>⚙</span>Настройки</button>
         <button type="button" data-view="journal"><span>▤</span>Журнал</button>
       </nav>
-      <div class="side-foot"><b>Локальная панель</b>Данные сеанса остаются на этом компьютере</div>
+      <div class="side-foot" id="panel-location"><b>Локальная панель</b>Данные сеанса остаются на этом компьютере</div>
     </aside>
     <main class="main">
-        <div class="topbar"><span class="breadcrumb">Пульс / <b id="breadcrumb">Обзор</b></span><div class="top-right"><button class="button neutral small" type="button" id="connect-pulse">Подключить Пульс</button><span id="trade-top-status">Брокерские заявки отключены</span><span class="badge" id="mode-badge">Мониторинг выключен</span></div></div>
+        <div class="topbar"><span class="breadcrumb">Пульс / <b id="breadcrumb">Обзор</b></span><div class="top-right"><a class="button neutral small" id="server-browser-top" target="_blank" rel="noopener noreferrer" hidden>Браузер Пульса</a><button class="button neutral small" type="button" id="connect-pulse">Подключить Пульс</button><span id="trade-top-status">Брокерские заявки отключены</span><span class="badge" id="mode-badge">Мониторинг выключен</span></div></div>
       <div class="content">
         <section class="view active" id="view-overview">
           <div class="page-head"><div><h1>Обзор</h1><p class="subtle" id="profile-heading">Профиль Пульса</p></div><div class="live-status"><i class="dot" id="source-dot"></i><span id="source-status">Подключение</span></div></div>
@@ -286,7 +287,7 @@
           el('auth-message').textContent = 'Заверши вход в окне Т-Банка; данные появятся автоматически.';
         } else {
           await api('/api/auth/start', {});
-          el('auth-message').textContent = 'Открываем окно Пульса…';
+          el('auth-message').textContent = el('server-browser-auth').hidden?'Открываем окно Пульса…':'Открываем Пульс на сервере. Перейди в серверный браузер и заверши вход.';
         }
       }
       catch (error) { el('auth-message').textContent = error.message; }
@@ -434,6 +435,8 @@
     }
     function renderState(state){
       renderAuth(state.auth);instruments=state.monitor.instruments||[];today=state.today||[];month=state.month||{status:'idle',items:[]};events=state.events||[];realOrders=state.real_orders||[];realMode=state.settings.real_mode||'off';
+      for(const id of ['server-browser-auth','server-browser-top']){const link=el(id);link.hidden=!state.server_mode;if(state.server_mode)link.href=state.browser_ui_url;}
+      if(state.server_mode){el('auth-instructions').textContent='Нажми «Войти в Т-Банк», затем открой серверный браузер и заверши вход в нём. Сеанс сохранится на сервере; эту вкладку после входа можно закрыть.';el('panel-location').textContent='Серверная панель · мониторинг работает на сервере';}
       renderBroker(state);renderTrading(state);
       const profile=new URL(state.settings.profile_url).pathname.split('/').filter(Boolean).at(-1);
       el('profile-heading').textContent=profile+' · профиль Пульса';el('source-profile').textContent=profile;

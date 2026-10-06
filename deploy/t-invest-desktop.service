@@ -1,0 +1,16 @@
+[Unit]
+Description=T-Invest loopback-only noVNC proxy
+Requires=t-invest-vnc.service
+After=t-invest-vnc.service
+
+[Service]
+User=t-invest-bot
+Group=t-invest-bot
+ExecStart=/usr/bin/websockify --web=/usr/share/novnc 127.0.0.1:6080 127.0.0.1:5901
+Restart=on-failure
+RestartSec=3
+UMask=0077
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

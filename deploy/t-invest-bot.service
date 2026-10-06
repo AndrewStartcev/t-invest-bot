@@ -1,0 +1,25 @@
+[Unit]
+Description=T-Invest Bot
+Wants=network-online.target
+Requires=t-invest-display.service
+After=network-online.target t-invest-display.service
+
+[Service]
+Type=simple
+User=t-invest-bot
+Group=t-invest-bot
+WorkingDirectory=/opt/t-invest-bot
+EnvironmentFile=/etc/t-invest-bot/server.env
+ExecStart=/opt/t-invest-bot/.venv/bin/python -u /opt/t-invest-bot/demo_admin.py --port 8765
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+KillMode=control-group
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/t-invest-bot
+
+[Install]
+WantedBy=multi-user.target

@@ -16,25 +16,28 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
 
+from broker_http import normalize_token
 from demo_engine import DEFAULT_RULES, asset_type, simulate, validated_rules
 from broker_read import BrokerError, account_snapshot, read_only_accounts
 from broker_trade import TradeError, full_access_accounts, order_state, prepare_order, submit_order
 from telegram_notify import NotificationError, send_notification
+from server_config import public_origin, server_mode
 from pulse_live import PulseBrowser, PulseError, canonical_profile_url, operations_url
 from pulse_replay import write_state
 
 
 ROOT = Path(__file__).resolve().parent
-SETTINGS_PATH = ROOT / ".local" / "demo-settings.json"
-STATE_PATH = ROOT / ".local" / "pulse-live-state.json"
-EVENTS_PATH = ROOT / ".local" / "events.json"
-POSITIONS_PATH = ROOT / ".local" / "demo-positions.json"
-TOKEN_PATH = ROOT / ".local" / "telegram-token.txt"
-BROKER_TOKEN_PATH = ROOT / ".local" / "broker-read-token.txt"
-BROKER_ACCOUNT_PATH = ROOT / ".local" / "broker-account.txt"
-TRADE_TOKEN_PATH = ROOT / ".local" / "broker-trade-token.txt"
-TRADE_ACCOUNT_PATH = ROOT / ".local" / "trade-account.txt"
-REAL_ORDERS_PATH = ROOT / ".local" / "real-orders.json"
+DATA_DIR = Path(os.environ.get("TINVEST_DATA_DIR", str(ROOT / ".local"))).expanduser().resolve()
+SETTINGS_PATH = DATA_DIR / "demo-settings.json"
+STATE_PATH = DATA_DIR / "pulse-live-state.json"
+EVENTS_PATH = DATA_DIR / "events.json"
+POSITIONS_PATH = DATA_DIR / "demo-positions.json"
+TOKEN_PATH = DATA_DIR / "telegram-token.txt"
+BROKER_TOKEN_PATH = DATA_DIR / "broker-read-token.txt"
+BROKER_ACCOUNT_PATH = DATA_DIR / "broker-account.txt"
+TRADE_TOKEN_PATH = DATA_DIR / "broker-trade-token.txt"
+TRADE_ACCOUNT_PATH = DATA_DIR / "trade-account.txt"
+REAL_ORDERS_PATH = DATA_DIR / "real-orders.json"
 DEFAULTS = {
     "profile_url": "https://www.tbank-online.com/invest/social/profile/LinMath/",
     "poll_seconds": 30,
@@ -94,7 +97,7 @@ def trade_token() -> str:
 
 
 def connect_trading(candidate: str) -> dict:
-    token = candidate.strip() if candidate else trade_token()
+    token = normalize_token(candidate if candidate else trade_token())
     if not token or len(token) > 1000 or any(char.isspace() for char in token):
         raise ValueError("Введи торговый токен T-Invest")
     accounts = full_access_accounts(token)
@@ -169,7 +172,7 @@ def save_private_text(path: Path, value: str) -> None:
 
 
 def connect_broker(candidate: str) -> dict:
-    token = candidate.strip() if candidate else broker_token()
+    token = normalize_token(candidate if candidate else broker_token())
     if not token or len(token) > 1000 or any(char.isspace() for char in token):
         raise ValueError("Введи токен T-Invest только для чтения")
     accounts = read_only_accounts(token)
@@ -815,7 +818,7 @@ def monitor_loop() -> None:
                         previous_browser, browser = browser, None
                         if previous_browser:
                             previous_browser.close()
-                        new_browser = PulseBrowser(ROOT / ".local" / "pulse-browser", headless=False)
+                        new_browser = PulseBrowser(DATA_DIR / "pulse-browser", headless=False)
                         new_browser.open(settings["profile_url"])
                         browser = new_browser
                     browser.show()
@@ -862,13 +865,13 @@ def monitor_loop() -> None:
                 if "ready" in request:
                     request["ready"].set()
 
-        if browser is None and AUTH["status"] == "checking" and not (ROOT / ".local" / "pulse-browser").exists():
+        if browser is None and AUTH["status"] == "checking" and not (DATA_DIR / "pulse-browser").exists():
             with LOCK:
                 AUTH.update(status="required", message="Первое подключение: нажми «Войти в Т-Банк»")
 
         if browser is None and AUTH["status"] in {"checking", "authenticated"} and time.monotonic() >= next_reconnect:
             try:
-                browser = PulseBrowser(ROOT / ".local" / "pulse-browser", headless=True)
+                browser = PulseBrowser(DATA_DIR / "pulse-browser", headless=True)
                 browser.open(settings["profile_url"])
                 next_poll = 0
             except Exception as error:
@@ -984,6 +987,8 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
+        elif self.path == "/api/health":
+            self.respond(200, {"status": "ok", "server_mode": server_mode()})
         elif self.path == "/api/state":
             with LOCK:
                 authenticated = AUTH["status"] == "authenticated"
@@ -993,14 +998,16 @@ class Handler(BaseHTTPRequestHandler):
                                    "trade_token_configured": bool(trade_token()), "trading": TRADING.copy(),
                                    "real_orders": list(REAL_ORDERS.values())[-30:], "real_order_count": len(REAL_ORDERS),
                                    "monitor": MONITOR if authenticated else {"status": "stopped", "message": "Ожидаем входа в Пульс", "last_check": None, "profile": "", "instrument_count": 0, "instruments": []},
-                                   "auth": AUTH, "today": TODAY if authenticated else [],
+                                   "auth": AUTH, "server_mode": server_mode(),
+                                   "browser_ui_url": "/desktop/vnc.html?autoconnect=1&resize=scale&path=desktop/websockify" if server_mode() else None,
+                                   "today": TODAY if authenticated else [],
                                    "month": MONTH.copy() if authenticated else {"status": "idle", "items": [], "processed": 0, "total": 0, "message": "", "loaded_at": None}})
         else:
             self.respond(404, {"error": "Не найдено"})
 
     def do_POST(self) -> None:
         origin = self.headers.get("Origin")
-        expected = f"http://127.0.0.1:{self.server.server_port}"
+        expected = public_origin() or f"http://127.0.0.1:{self.server.server_port}"
         if origin and origin != expected:
             self.respond(403, {"error": "Запрос из другого источника отклонён"})
             return
@@ -1199,6 +1206,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--port", type=int, default=8765)
     args = parser.parse_args()
+    public_origin()  # Reject malformed server configuration before opening a port.
+    os.umask(0o077)
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
     try:
         server = LocalHTTPServer(("127.0.0.1", args.port), Handler)
     except OSError as error:

@@ -7,6 +7,7 @@ import os
 import re
 import time
 import ctypes
+import shutil
 from ctypes import wintypes
 from pathlib import Path
 from urllib.parse import parse_qsl, quote, unquote, urlencode, urlparse, urlunparse
@@ -72,11 +73,16 @@ def is_tbank_cookie(cookie: dict) -> bool:
 
 def browser_executable() -> str | None:
     configured = os.environ.get("PULSE_BROWSER_PATH")
+    if not configured and os.name != "nt" and os.environ.get("PLAYWRIGHT_BROWSERS_PATH"):
+        # Server installer provisions this browser; avoid selecting a snap wrapper.
+        return None
     candidates = [configured] if configured else [
         r"C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe",
         r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
         r"C:\Program Files\Google\Chrome\Application\chrome.exe",
     ]
+    if not configured and os.name != "nt":
+        candidates = [shutil.which(name) for name in ("chromium", "chromium-browser", "google-chrome", "google-chrome-stable")]
     return next((path for path in candidates if path and Path(path).is_file()), None)
 
 
@@ -157,8 +163,10 @@ class PulseBrowser:
         except ImportError as error:
             raise PulseError("Установи зависимости: python -m pip install -r requirements.txt") from error
         executable = browser_executable()
-        if not executable:
+        if not executable and (os.name == "nt" or os.environ.get("PULSE_BROWSER_PATH")):
             raise PulseError("Brave, Edge или Chrome не найден. Задай PULSE_BROWSER_PATH")
+        if not self.headless and os.name != "nt" and not os.environ.get("DISPLAY"):
+            raise PulseError("Нет DISPLAY для входа в Пульс. На сервере запусти t-invest-display.service и открой серверный браузер")
         self.profile_name, url = operations_url(profile_url)
         self.opened_at = time.monotonic()
         self.profile_dir.mkdir(parents=True, exist_ok=True)
@@ -168,6 +176,10 @@ class PulseBrowser:
             self.windows_before_open = set()
         self.playwright = sync_playwright().start()
         try:
+            if not executable:
+                executable = self.playwright.chromium.executable_path
+                if not Path(executable).is_file():
+                    raise PulseError("Chromium Playwright не установлен: выполни python -m playwright install chromium")
             self.context = self.playwright.chromium.launch_persistent_context(
                 str(self.profile_dir), executable_path=executable, headless=self.headless,
                 viewport={"width": 1280, "height": 900},
@@ -198,7 +210,7 @@ class PulseBrowser:
             if "ERR_CERT_AUTHORITY_INVALID" in str(error):
                 raise PulseError(
                     "Защищённое соединение с Т-Банком не подтверждено "
-                    "(ERR_CERT_AUTHORITY_INVALID). Проверь дату и время Windows, "
+                    "(ERR_CERT_AUTHORITY_INVALID). Проверь дату и время компьютера/сервера и доверенные сертификаты, "
                     "затем открой страницу Пульса в обычном браузере на этом компьютере. "
                     "Вход остановлен."
                 ) from error
@@ -420,7 +432,7 @@ class PulseBrowser:
         path = parsed.path.rsplit("/instrument", 1)[0] + f"/operation/instrument/{quote(ticker, safe='')}/{quote(class_code, safe='')}"
         url = urlunparse(parsed._replace(path=path))
         data = payload(self._fetch(with_cursor(url, cursor, parameter="cursor") if cursor is not None else url))
-        return {"items": [{key: item.get(key) for key in ("tradeDateTime", "action", "currency", "averagePrice")}
+        return {"items": [{key: item.get(key) for key in ("tradeDateTime", "action", "currency", "averagePrice", "relativeYield")}
                           for item in data["items"]], "hasNext": bool(data.get("hasNext")), "nextCursor": data.get("nextCursor")}
 
     def close(self) -> None:

@@ -1,0 +1,17 @@
+[Unit]
+Description=T-Invest browser window manager
+Requires=t-invest-display.service
+After=t-invest-display.service
+
+[Service]
+User=t-invest-bot
+Group=t-invest-bot
+Environment=DISPLAY=:99
+ExecStart=/usr/bin/openbox --display :99
+Restart=on-failure
+RestartSec=3
+UMask=0077
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

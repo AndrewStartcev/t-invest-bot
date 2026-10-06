@@ -449,6 +449,7 @@ class LiveMonitorTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder, patch.dict(sys.modules, {
                 "playwright": package, "playwright.sync_api": sync_api}), \
                 patch("pulse_live.browser_executable", return_value="fake-browser"), \
+                patch.dict("os.environ", {"DISPLAY": ":99"}), \
                 patch("pulse_live.visible_browser_windows", return_value={}):
             browser = PulseBrowser(Path(folder))
             with self.assertRaisesRegex(PulseError, "ERR_CERT_AUTHORITY_INVALID"):

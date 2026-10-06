@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-import json
 from decimal import Decimal, InvalidOperation
-from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
+from urllib.request import urlopen
 
-BASE = "https://invest-public-api.tbank.ru/rest/tinkoff.public.invest.api.contract.v1."
+from broker_http import BASE, APIError, request_json
 METHODS = {
     "accounts": "UsersService/GetAccounts",
     "positions": "OperationsService/GetPositions",
@@ -22,28 +20,11 @@ class BrokerError(Exception):
 def call(method: str, token: str, payload: dict, opener=urlopen) -> dict:
     if method not in METHODS:
         raise BrokerError("Этот метод API недоступен")
-    if not token or any(char.isspace() for char in token):
-        raise BrokerError("Укажи корректный токен T-Invest")
-    request = Request(BASE + METHODS[method], json.dumps(payload).encode("utf-8"), {
-        "Authorization": "Bearer " + token,
-        "Content-Type": "application/json",
-    }, method="POST")
     try:
-        with opener(request, timeout=12) as response:
-            data = json.load(response)
-    except HTTPError as error:
-        if error.code in (401, 403):
-            raise BrokerError("Токен отклонён T-Invest. Проверь его срок и доступ к счёту") from None
-        if error.code == 429:
-            raise BrokerError("T-Invest ограничил частоту запросов. Повтори позже") from None
-        raise BrokerError(f"T-Invest API вернул ошибку HTTP {error.code}") from None
-    except (URLError, TimeoutError, OSError) as error:
-        raise BrokerError("Нет связи с T-Invest API. Проверь интернет и повтори") from None
-    except (ValueError, UnicodeError) as error:
-        raise BrokerError("T-Invest API вернул некорректный ответ") from None
-    if not isinstance(data, dict):
-        raise BrokerError("T-Invest API вернул некорректный ответ")
-    return data
+        return request_json(METHODS[method], token, payload, opener)
+    except APIError as error:
+        raise BrokerError(str(error)) from None
+
 
 
 def read_only_accounts(token: str, opener=urlopen) -> list[dict]:

@@ -6,13 +6,12 @@ order book, account positions, broker limits and configured monetary caps.
 
 from __future__ import annotations
 
-import json
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
-from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
+from urllib.request import urlopen
 
-from broker_read import BASE, BrokerError, money
+from broker_read import money
+from broker_http import APIError, request_json
 from demo_engine import sale_quantity
 
 METHODS = {
@@ -36,26 +35,11 @@ class TradeError(Exception):
 def api_call(method: str, token: str, payload: dict, opener=urlopen) -> dict:
     if method not in METHODS:
         raise TradeError("Неизвестный метод T-Invest API")
-    if not token or any(char.isspace() for char in token):
-        raise TradeError("Торговый токен не задан")
-    request = Request(BASE + METHODS[method], json.dumps(payload).encode("utf-8"), {
-        "Authorization": "Bearer " + token, "Content-Type": "application/json"}, method="POST")
     try:
-        with opener(request, timeout=12) as response:
-            result = json.load(response)
-    except HTTPError as error:
-        if error.code in (401, 403):
-            raise TradeError("Торговый токен отклонён или нет доступа к счёту") from None
-        if error.code == 429:
-            raise TradeError("T-Invest ограничил частоту запросов") from None
-        raise TradeError(f"T-Invest отклонил запрос: HTTP {error.code}") from None
-    except (URLError, TimeoutError, OSError):
-        raise TradeError("Нет ответа от T-Invest API; статус заявки требует сверки") from None
-    except (ValueError, UnicodeError):
-        raise TradeError("Некорректный ответ T-Invest API; статус заявки требует сверки") from None
-    if not isinstance(result, dict):
-        raise TradeError("Некорректный ответ T-Invest API")
-    return result
+        return request_json(METHODS[method], token, payload, opener)
+    except APIError as error:
+        raise TradeError(str(error)) from None
+
 
 
 def full_access_accounts(token: str, call=api_call) -> list[dict]:
