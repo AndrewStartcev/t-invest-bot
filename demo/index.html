@@ -354,7 +354,7 @@
     el('open-pulse').addEventListener('click', openConnectDialog);
     el('refresh-source').addEventListener('click', async () => {
       const button = el('refresh-source'); button.disabled = true;
-      try { if (sharedSource) { await refresh(); return; } if (authStatus !== 'authenticated' && authStatus !== 'waiting') { openConnectDialog(); return; } await api('/api/auth/check', {}); el('source-message').textContent = 'Обновляем данные Пульса…'; }
+      try { if (sharedSource) { await api('/api/source/refresh', {}); await refresh(); return; } if (authStatus !== 'authenticated' && authStatus !== 'waiting') { openConnectDialog(); return; } await api('/api/auth/check', {}); el('source-message').textContent = 'Обновляем данные Пульса…'; }
       catch (error) { el('source-message').textContent = error.message; }
       finally { setTimeout(() => button.disabled = false, 3000); }
     });
@@ -550,10 +550,10 @@
       el('auto-copy-button').className=autoCopyEnabled?'button neutral small':'button small';
       el('auto-copy-button').hidden=realMode!=='off';
       el('copy-note').textContent=realMode==='auto'?'Новые сделки проверяются по лимитам и отправляются брокеру лимитными заявками. Для прошлых покупок подготовь заявку кнопкой в строке.':realMode==='confirm'?'Новые сделки ожидают подтверждения в журнале. Для прошлых покупок подготовь заявку кнопкой в строке.':autoCopyEnabled?'Новые покупки и продажи повторяются условно по лимитам. Кнопки в строках позволяют обработать ранее опубликованные покупки за 24 часа. Реальных заявок нет.':'Кнопки в строках условно повторяют покупки за 24 часа. Автокопирование новых сделок выключено. Реальных заявок нет.';
-      el('source-status').textContent=state.monitor.status==='scheduled'?'Ожидание расписания · МСК':state.auth.status!=='authenticated'?'Пульс не подключён':state.monitor.status==='error'?'Нужна проверка':state.monitor.status==='scheduled'?'Ожидание расписания · МСК':state.settings.monitoring_enabled?'Мониторинг включён':'Мониторинг выключен';
+      el('source-status').textContent=state.monitor.status==='scheduled'?'Ожидание расписания · МСК':state.monitor.status==='error'?'Ошибка чтения Пульса':state.monitor.status==='checking'?'Проверяем данные Пульса':state.auth.status!=='authenticated'?'Пульс не подключён':state.settings.monitoring_enabled?'Мониторинг включён':'Мониторинг выключен';
       el('source-dot').className='dot'+(state.auth.status!=='authenticated'||state.monitor.status==='error'?' bad':state.monitor.status==='running'?' good':'');
       el('last-check').textContent=state.monitor.last_check?fmtDate(state.monitor.last_check):'—';
-      el('source-message').textContent=state.auth.status==='authenticated'?state.monitor.message:state.auth.message;el('instrument-total').textContent=instruments.length;
+      el('source-message').textContent=state.auth.status==='authenticated'||['error','checking','scheduled'].includes(state.monitor.status)?state.monitor.message:state.auth.message;el('instrument-total').textContent=instruments.length;
       const buys=today.filter(item=>item.action==='buy').length,sells=today.filter(item=>item.action==='sell').length;
       const demos=events.filter(item=>item.trade==='ДЕМО: куплено'||item.trade==='ДЕМО: продано');
       el('source-buys').textContent=buys;el('source-sells').textContent=sells;el('our-buys').textContent=demos.filter(item=>item.side==='buy').length;el('demo-total').textContent=demos.length;

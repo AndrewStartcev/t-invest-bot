@@ -1234,7 +1234,9 @@ def remote_monitor_loop() -> None:
             request = None
         if request:
             try:
-                if request["action"] == "history" and AUTH["status"] == "authenticated":
+                if request["action"] == "source_refresh":
+                    next_poll = 0
+                elif request["action"] == "history" and AUTH["status"] == "authenticated":
                     request["result"] = browser.history(request["ticker"], request["class_code"], request["cursor"])
                 elif request["action"] == "month" and AUTH["status"] == "authenticated":
                     cutoff = datetime.now(timezone.utc) - timedelta(days=30)
@@ -1265,7 +1267,7 @@ def remote_monitor_loop() -> None:
                     AUTH.update(status="required", message=message)
                     MONITOR.update(status="error", message=message)
             next_poll = time.monotonic() + settings["poll_seconds"]
-            if not schedule_was_open:
+            if not schedule_open(settings):
                 next_poll = time.monotonic() + 0.5
         if month_scan:
             try:
@@ -1376,8 +1378,8 @@ class Handler(BaseHTTPRequestHandler):
                                    "broker_token_configured": bool(broker_token()), "broker": BROKER.copy(),
                                    "trade_token_configured": bool(trade_token()), "trading": TRADING.copy(),
                                    "real_orders": list(REAL_ORDERS.values())[-30:], "real_order_count": len(REAL_ORDERS),
-                                   "monitor": MONITOR if authenticated else {"status": "stopped", "message": "Ожидаем входа в Пульс", "last_check": None, "profile": "", "instrument_count": 0, "instruments": []},
-                                   "auth": ({"status": AUTH["status"], "message": "Источник подключён" if authenticated else "Источник подключает владелец сервиса. Вход клиента в банк не требуется."} if shared_source() else AUTH.copy()),
+                                   "monitor": MONITOR.copy() if authenticated else {**MONITOR, "instrument_count": 0, "instruments": []},
+                                   "auth": ({"status": AUTH["status"], "message": MONITOR["message"] if MONITOR["status"] in {"error", "checking"} else "Источник подключён" if authenticated else "Источник подключает владелец сервиса. Вход клиента в банк не требуется."} if shared_source() else AUTH.copy()),
                                    "server_mode": server_mode(), "shared_source": shared_source(),
                                    "browser_ui_url": "/desktop/vnc.html?autoconnect=1&resize=scale&path=desktop/websockify&view_only=false" if server_mode() and not shared_source() else None,
                                    "today": TODAY if authenticated else [],
@@ -1454,7 +1456,7 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError("Нужен объект JSON")
             with LOCK:
                 authenticated = AUTH["status"] == "authenticated"
-            if not authenticated and self.path not in {"/api/approval/decide", "/api/approval/refresh", "/api/asset/forget", "/api/auth/start", "/api/browser/show", "/api/auth/check", "/api/settings", "/api/auto-copy", "/api/demo", "/api/demo/scenario", "/api/demo/reset", "/api/telegram/test", "/api/broker/connect", "/api/broker/select", "/api/broker/refresh", "/api/trade/connect", "/api/trade/select", "/api/trade/preview", "/api/trade/submit", "/api/trade/reconcile"}:
+            if not authenticated and self.path not in {"/api/source/refresh", "/api/approval/decide", "/api/approval/refresh", "/api/asset/forget", "/api/auth/start", "/api/browser/show", "/api/auth/check", "/api/settings", "/api/auto-copy", "/api/demo", "/api/demo/scenario", "/api/demo/reset", "/api/telegram/test", "/api/broker/connect", "/api/broker/select", "/api/broker/refresh", "/api/trade/connect", "/api/trade/select", "/api/trade/preview", "/api/trade/submit", "/api/trade/reconcile"}:
                 self.respond(403, {"error": "Сначала авторизуйся в Пульсе"})
                 return
             if self.path == "/api/settings":
@@ -1594,6 +1596,14 @@ class Handler(BaseHTTPRequestHandler):
                     if AUTH["status"] != "opening":
                         AUTH.update(status="opening", message="Открываем окно Пульса…")
                         HISTORY_REQUESTS.put({"action": "auth_start"})
+                self.respond(202, {"ok": True})
+            elif self.path == "/api/source/refresh":
+                if os.environ.get("TINVEST_ROLE") != "client":
+                    raise ValueError("Проверка общего источника доступна в кабинете клиента")
+                with LOCK:
+                    if MONITOR["status"] != "checking":
+                        MONITOR.update(status="checking", message="Обновляем данные общего источника…")
+                        HISTORY_REQUESTS.put({"action": "source_refresh"})
                 self.respond(202, {"ok": True})
             elif self.path == "/api/auth/check":
                 with LOCK:
