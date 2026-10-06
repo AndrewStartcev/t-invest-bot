@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="ru">
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Источник Пульса — владелец</title>
+<style>
+body{font:16px/1.6 system-ui,sans-serif;background:#f5f6fa;color:#1d2433;margin:0;padding:32px}main{max-width:760px;margin:auto;background:white;border-radius:16px;padding:28px}h1{font-size:26px}button,a{font:inherit}button{cursor:pointer;border:0;border-radius:8px;padding:12px 16px;background:#ffdd2d;margin:4px}a{display:inline-block;margin:12px 4px;color:#2459b5}#status{padding:16px;background:#f5f6fa;border-radius:8px}button:disabled{opacity:.5}small{color:#596476}
+</style>
+<main>
+<h1>Источник сделок Пульса</h1>
+<p>Войди со своего аккаунта Т-Банка один раз. Этот сеанс используется для чтения сделок выбранного профиля Пульса. Брокерские заявки выполняются через отдельный API-токен клиента.</p>
+<p id="status" role="status">Проверяем источник…</p>
+<button id="start" type="button">Открыть окно входа</button>
+<button id="check" type="button">Проверить сеанс</button>
+<br><a href="/desktop/vnc.html?autoconnect=1&amp;resize=scale&amp;path=desktop/websockify&amp;view_only=false" target="_blank" rel="noopener noreferrer">Открыть серверный браузер вручную</a>
+<p><small>Пароль этой страницы — только для владельца. Не передавай его клиенту. Банковский сеанс хранится на сервере; доступ к файлам сервера позволяет получить его данные. Клиенту дай адрес основной панели и её отдельный пароль.</small></p>
+</main>
+<script>
+const status=document.getElementById('status'),start=document.getElementById('start'),check=document.getElementById('check');
+let popup=null;
+async function api(path,payload){const response=await fetch('/source-admin/api/'+path,payload===undefined?{cache:'no-store'}:{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});const data=await response.json();if(!response.ok)throw Error(data.error||'Ошибка запроса');return data;}
+async function refresh(){try{const state=await api('state');status.textContent=state.auth.message+(state.last_check?' · Последняя проверка: '+new Date(state.last_check).toLocaleString('ru-RU'):'');start.textContent=state.auth.status==='authenticated'?'Показать браузер':'Открыть окно входа';}catch(error){status.textContent=error.message;}}
+start.addEventListener('click',async()=>{if(popup&&!popup.closed)popup.focus();else{popup=window.open('/desktop/vnc.html?autoconnect=1&resize=scale&path=desktop/websockify&view_only=false','t-invest-source','popup,width=1440,height=1000,resizable=yes,scrollbars=yes');if(popup)popup.opener=null;}start.disabled=true;try{await api('start',{});status.textContent=popup?'Заверши вход в окне банка. Не отправляй пароль или SMS в чат.':'Разреши всплывающее окно или открой серверный браузер по ссылке ниже.';}catch(error){status.textContent=error.message;}finally{start.disabled=false;}});
+check.addEventListener('click',async()=>{check.disabled=true;try{await api('check',{});await refresh();}catch(error){status.textContent=error.message;}finally{check.disabled=false;}});
+refresh();setInterval(refresh,4000);
+</script>
+</html>

@@ -9,13 +9,13 @@ const html = fs.readFileSync(path.join(__dirname, '../demo/index.html'), 'utf8')
 const handlers = html.slice(html.indexOf('    function openServerBrowser()'),
   html.indexOf("    el('auth-button').addEventListener('click', startAuth)"));
 
-function harness({server = true, blocked = false, status = 'required'} = {}) {
+function harness({server = true, blocked = false, status = 'required', shared = false} = {}) {
   const calls = [], elements = new Map();
   const popup = {closed: false, opener: {}, focus() {calls.push('focus');}};
   const pending = [];
   const context = vm.createContext({
     serverBrowserUrl: server ? '/desktop/vnc.html?path=desktop/websockify' : null,
-    pulseWindow: null, authStatus: status,
+    pulseWindow: null, authStatus: status, sharedSource: shared, popupBlocked: false,
     el(id) {if (!elements.has(id)) elements.set(id, {}); return elements.get(id);},
     window: {open(url, name) {calls.push({open: url, name}); return blocked ? null : popup;}},
     api(endpoint) {
@@ -62,4 +62,25 @@ test('local Windows mode does not open a remote desktop window', async () => {
   assert.equal(h.calls[0].request, '/api/auth/start');
   h.pending.shift()();
   await click;
+});
+
+
+test('a shared-source client cannot launch the source owner bank session', async () => {
+  const h = harness({shared: true});
+  await h.context.startAuth();
+  assert.equal(h.calls.length, 0);
+});
+
+
+test('client settings remain accessible while the shared source is offline', () => {
+  const h = harness({shared: true});
+  h.context.document = {body: {style: {}}};
+  h.context.authDismissed = false;
+  const render = html.slice(html.indexOf('    function renderAuth(auth)'), html.indexOf('    function openConnectDialog()'));
+  vm.runInContext(render, h.context);
+  h.context.renderAuth({status: 'required', message: 'Источник подключает владелец'});
+  assert.equal(h.elements.get('auth-screen').hidden, true);
+  assert.equal(h.elements.get('admin-app').inert, false);
+  assert.equal(h.elements.get('connect-pulse').hidden, true);
+  assert.equal(h.elements.get('open-pulse').hidden, true);
 });

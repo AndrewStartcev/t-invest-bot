@@ -28,6 +28,7 @@ install -d -m 755 /var/www/t-invest-bot-acme
 python3 -m venv "$PROJECT/.venv"
 "$PROJECT/.venv/bin/python" -m pip install -r "$PROJECT/requirements.txt"
 PLAYWRIGHT_BROWSERS_PATH="$PROJECT/.playwright" "$PROJECT/.venv/bin/python" -m playwright install --with-deps chromium
+if [[ ! -f /etc/t-invest-bot/server.env ]]; then
 cat > /etc/t-invest-bot/server.env <<EOF
 TINVEST_PUBLIC_ORIGIN=https://$DOMAIN
 TINVEST_DATA_DIR=/var/lib/t-invest-bot
@@ -35,6 +36,7 @@ PLAYWRIGHT_BROWSERS_PATH=$PROJECT/.playwright
 DISPLAY=:99
 PYTHONUNBUFFERED=1
 EOF
+fi
 chmod 600 /etc/t-invest-bot/server.env
 if [[ ! -f /etc/nginx/t-invest-bot.htpasswd ]]; then
     echo "Задай пароль входа в панель для пользователя admin:"

@@ -244,7 +244,7 @@
   <script>
     const el = id => document.getElementById(id);
     let instruments = [], today = [], month = {status:'idle',items:[]}, monthView = false, events = [], realOrders = [], selected = null, historyCursor = null, tokenConfigured = false, authStatus = 'checking', authDismissed = false, instrumentLimit = 60, autoCopyEnabled = false, realMode = 'off', currentPreview = null;
-    let serverBrowserUrl = null, pulseWindow = null, popupBlocked = false;
+    let serverBrowserUrl = null, pulseWindow = null, popupBlocked = false, sharedSource = false;
     const tabs = [...document.querySelectorAll('[data-view]')];
     const pages = [...document.querySelectorAll('.view')];
     const names = {overview:'Обзор',settings:'Настройки',journal:'Журнал'};
@@ -264,13 +264,13 @@
     function renderAuth(auth) {
       authStatus = auth.status;
       const ready = auth.status === 'authenticated';
-      const showDialog = !ready && !authDismissed;
+      const showDialog = !sharedSource && !ready && !authDismissed;
       el('auth-screen').hidden = !showDialog;
       el('admin-app').inert = showDialog;
       document.body.style.overflow = showDialog ? 'hidden' : '';
-      el('connect-pulse').hidden = ready;
-      el('open-pulse').hidden = ready;
-      el('auth-summary').textContent = ready ? 'Авторизован' : auth.status === 'waiting' ? 'Ожидаем входа' : auth.status === 'checking' || auth.status === 'opening' ? 'Проверяем' : 'Нужен вход';
+      el('connect-pulse').hidden = sharedSource || ready;
+      el('open-pulse').hidden = sharedSource || ready;
+      el('auth-summary').textContent = sharedSource ? (ready ? 'Источник подключён' : 'Источник недоступен') : ready ? 'Авторизован' : auth.status === 'waiting' ? 'Ожидаем входа' : auth.status === 'checking' || auth.status === 'opening' ? 'Проверяем' : 'Нужен вход';
       el('auth-message').textContent = auth.message || 'Ожидаем входа';
       if (popupBlocked && !ready) el('auth-message').textContent += ' Разреши всплывающее окно или нажми «Открыть серверный браузер».';
       el('auth-dot').className = 'dot' + (ready ? ' good' : auth.status === 'required' ? ' bad' : '');
@@ -289,6 +289,7 @@
       return false;
     }
     async function startAuth() {
+      if (sharedSource) return;
       // Open during the click, before any await, so popup blockers allow it.
       const windowOpened = openServerBrowser();
       popupBlocked = !windowOpened;
@@ -311,7 +312,7 @@
     el('open-pulse').addEventListener('click', openConnectDialog);
     el('refresh-source').addEventListener('click', async () => {
       const button = el('refresh-source'); button.disabled = true;
-      try { if (authStatus !== 'authenticated' && authStatus !== 'waiting') { openConnectDialog(); return; } await api('/api/auth/check', {}); el('source-message').textContent = 'Обновляем данные Пульса…'; }
+      try { if (sharedSource) { await refresh(); return; } if (authStatus !== 'authenticated' && authStatus !== 'waiting') { openConnectDialog(); return; } await api('/api/auth/check', {}); el('source-message').textContent = 'Обновляем данные Пульса…'; }
       catch (error) { el('source-message').textContent = error.message; }
       finally { setTimeout(() => button.disabled = false, 3000); }
     });
@@ -424,7 +425,7 @@
       el('broker-overview-cash').textContent=el('broker-cash').textContent=cash;
       el('broker-overview-positions').textContent=el('broker-position-count').textContent=count;
       el('broker-total').textContent=snapshot?.total_rub!==null&&snapshot?.total_rub!==undefined?Number(snapshot.total_rub).toLocaleString('ru-RU')+' ₽':'—';
-      el('broker-token-hint').textContent=state.broker_token_configured?'Токен сохранён локально; введи новый, чтобы заменить':'Сохранённый токен здесь не отображается';
+      el('broker-token-hint').textContent=state.broker_token_configured?(state.server_mode?'Токен сохранён на сервере; введи новый, чтобы заменить':'Токен сохранён локально; введи новый, чтобы заменить'):'Сохранённый токен здесь не отображается';
       el('broker-updated').textContent=(broker.last_check?'Последний успешный снимок: '+fmtDate(broker.last_check):'Данные ещё не загружены')+(broker.status==='error'?' · обновление не удалось, данные могут быть устаревшими':' · автообновление каждые 30 сек.');
       const selector=el('broker-account'),current=selector.value;selector.replaceChildren();
       for(const item of broker.accounts||[]){const option=document.createElement('option');option.value=item.id;option.textContent=item.name+' · '+item.id.slice(-4);selector.append(option);}
@@ -442,15 +443,15 @@
       selector.value=trading.selected_account_id||'';selector.disabled=!trading.accounts?.length;
       const label=trading.status==='connected'?(account?.name||'Подключён'):trading.status==='error'?'Ошибка':'Не подключён';
       el('trade-connection').textContent=el('trade-summary').textContent=label;
-      el('trade-token-hint').textContent=state.trade_token_configured?'Токен сохранён локально; введи новый, чтобы заменить':'Токен не задан';
+      el('trade-token-hint').textContent=state.trade_token_configured?(state.server_mode?'Токен сохранён на сервере; введи новый, чтобы заменить':'Токен сохранён локально; введи новый, чтобы заменить'):'Токен не задан';
       el('trade-mode-status').textContent=state.settings.real_mode==='auto'?'Автоматически':state.settings.real_mode==='confirm'?'С подтверждением':'Выключена';
       if(trading.status==='error')el('trade-message').textContent=trading.message;
     }
     function renderState(state){
-      renderAuth(state.auth);instruments=state.monitor.instruments||[];today=state.today||[];month=state.month||{status:'idle',items:[]};events=state.events||[];realOrders=state.real_orders||[];realMode=state.settings.real_mode||'off';
-      for(const id of ['server-browser-auth','server-browser-top']){const link=el(id);link.hidden=!state.server_mode;if(state.server_mode)link.href=state.browser_ui_url;}
-      serverBrowserUrl=state.server_mode?state.browser_ui_url:null;
-      if(state.server_mode){el('auth-instructions').textContent='Нажми «Войти в Т-Банк»: окно банка откроется у тебя в браузере. Заверши вход; сеанс сохранится на сервере. После входа это окно можно закрыть.';el('panel-location').textContent='Серверная панель · мониторинг работает на сервере';}
+      sharedSource=Boolean(state.shared_source);renderAuth(state.auth);instruments=state.monitor.instruments||[];today=state.today||[];month=state.month||{status:'idle',items:[]};events=state.events||[];realOrders=state.real_orders||[];realMode=state.settings.real_mode||'off';
+      for(const id of ['server-browser-auth','server-browser-top']){const link=el(id);link.hidden=!state.browser_ui_url;if(state.browser_ui_url)link.href=state.browser_ui_url;}
+      serverBrowserUrl=state.browser_ui_url||null;
+      if(state.server_mode){el('auth-instructions').textContent='Нажми «Войти в Т-Банк»: окно банка откроется у тебя в браузере. Заверши вход; сеанс сохранится на сервере. После входа это окно можно закрыть.';el('panel-location').textContent=sharedSource?'Источник Пульса — владелец сервиса · брокерский счёт — клиент':'Серверная панель · мониторинг работает на сервере';}
       renderBroker(state);renderTrading(state);
       const profile=new URL(state.settings.profile_url).pathname.split('/').filter(Boolean).at(-1);
       el('profile-heading').textContent=profile+' · профиль Пульса';el('source-profile').textContent=profile;
@@ -487,7 +488,7 @@
       el('telegram-token-state').textContent=tokenConfigured?'Сохранён':'Не задан';
       el('telegram-note').textContent=state.settings.paused?'Отправка уведомлений приостановлена.':!hasRecipient?'Без ID получателя бот ничего не отправляет.':!tokenConfigured?'Укажи токен бота в настройках.':testFailed?lastTest.notification:'Нажми «Проверить отправку», чтобы подтвердить доставку.';
       el('bot-summary').textContent=tokenConfigured?'Токен сохранён':'Токен не задан';
-      el('token-hint').textContent=tokenConfigured?'Токен сохранён локально; введи новый, чтобы заменить':'Токен хранится только локально и не показывается';
+      el('token-hint').textContent=tokenConfigured?(state.server_mode?'Токен сохранён на сервере; введи новый, чтобы заменить':'Токен сохранён локально; введи новый, чтобы заменить'):(state.server_mode?'Токен хранится на сервере и не показывается':'Токен хранится локально и не показывается');
       renderToday();renderInstruments();renderEvents();
     }
     async function refresh(){renderState(await api('/api/state'));}

@@ -16,3 +16,19 @@ def public_origin() -> str | None:
 
 def server_mode() -> bool:
     return bool(public_origin())
+
+
+def shared_source() -> bool:
+    return os.environ.get("TINVEST_PULSE_SOURCE", "personal") == "shared"
+
+
+def source_key() -> str:
+    return os.environ.get("TINVEST_SOURCE_KEY", "")
+
+
+def validate_source_config() -> None:
+    mode = os.environ.get("TINVEST_PULSE_SOURCE", "personal")
+    if mode not in {"personal", "shared"}:
+        raise ValueError("TINVEST_PULSE_SOURCE: personal или shared")
+    if shared_source() and (not server_mode() or len(source_key()) < 32):
+        raise ValueError("Общий источник требует HTTPS origin и отдельный TINVEST_SOURCE_KEY")

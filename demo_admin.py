@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import hmac
 import json
 import os
 import queue
@@ -21,7 +22,7 @@ from demo_engine import DEFAULT_RULES, asset_type, simulate, validated_rules
 from broker_read import BrokerError, account_snapshot, read_only_accounts
 from broker_trade import TradeError, full_access_accounts, order_state, prepare_order, submit_order
 from telegram_notify import NotificationError, send_notification
-from server_config import public_origin, server_mode
+from server_config import public_origin, server_mode, shared_source, source_key, validate_source_config
 from pulse_live import PulseBrowser, PulseError, canonical_profile_url, operations_url
 from pulse_replay import write_state
 
@@ -978,7 +979,32 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def source_authorized(self) -> bool:
+        # Only the owner nginx location injects this secret; the client location strips it.
+        return (shared_source() and len(source_key()) >= 32
+                and hmac.compare_digest(self.headers.get("X-TInvest-Source-Key", "").encode("utf-8"), source_key().encode("utf-8")))
+
     def do_GET(self) -> None:
+        if self.path.startswith("/source-admin"):
+            if not self.source_authorized():
+                self.respond(403, {"error": "Доступ только владельцу источника"})
+                return
+            if self.path == "/source-admin/api/state":
+                with LOCK:
+                    self.respond(200, {"auth": AUTH.copy(), "status": MONITOR["status"],
+                                       "last_check": MONITOR["last_check"]})
+                return
+            if self.path not in {"/source-admin", "/source-admin/"}:
+                self.respond(404, {"error": "Не найдено"})
+                return
+            body = (ROOT / "demo" / "source-admin.html").read_bytes()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
         if self.path == "/":
             body = (ROOT / "demo" / "index.html").read_bytes()
             self.send_response(200)
@@ -998,14 +1024,29 @@ class Handler(BaseHTTPRequestHandler):
                                    "trade_token_configured": bool(trade_token()), "trading": TRADING.copy(),
                                    "real_orders": list(REAL_ORDERS.values())[-30:], "real_order_count": len(REAL_ORDERS),
                                    "monitor": MONITOR if authenticated else {"status": "stopped", "message": "Ожидаем входа в Пульс", "last_check": None, "profile": "", "instrument_count": 0, "instruments": []},
-                                   "auth": AUTH, "server_mode": server_mode(),
-                                   "browser_ui_url": "/desktop/vnc.html?autoconnect=1&resize=scale&path=desktop/websockify&view_only=false" if server_mode() else None,
+                                   "auth": ({"status": AUTH["status"], "message": "Источник подключён" if authenticated else "Источник подключает владелец сервиса. Вход клиента в банк не требуется."} if shared_source() else AUTH.copy()),
+                                   "server_mode": server_mode(), "shared_source": shared_source(),
+                                   "browser_ui_url": "/desktop/vnc.html?autoconnect=1&resize=scale&path=desktop/websockify&view_only=false" if server_mode() and not shared_source() else None,
                                    "today": TODAY if authenticated else [],
                                    "month": MONTH.copy() if authenticated else {"status": "idle", "items": [], "processed": 0, "total": 0, "message": "", "loaded_at": None}})
         else:
             self.respond(404, {"error": "Не найдено"})
 
     def do_POST(self) -> None:
+        owner_routes = {"/source-admin/api/start": "/api/auth/start",
+                        "/source-admin/api/show": "/api/browser/show",
+                        "/source-admin/api/check": "/api/auth/check"}
+        if self.path.startswith("/source-admin"):
+            if not self.source_authorized():
+                self.respond(403, {"error": "Доступ только владельцу источника"})
+                return
+            if self.path not in owner_routes:
+                self.respond(404, {"error": "Не найдено"})
+                return
+            self.path = owner_routes[self.path]
+        elif shared_source() and self.path in owner_routes.values():
+            self.respond(403, {"error": "Источник подключает владелец сервиса"})
+            return
         origin = self.headers.get("Origin")
         expected = public_origin() or f"http://127.0.0.1:{self.server.server_port}"
         if origin and origin != expected:
@@ -1207,6 +1248,7 @@ def main() -> None:
     parser.add_argument("--port", type=int, default=8765)
     args = parser.parse_args()
     public_origin()  # Reject malformed server configuration before opening a port.
+    validate_source_config()
     os.umask(0o077)
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     try:
