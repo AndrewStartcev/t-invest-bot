@@ -7,7 +7,7 @@ After=t-invest-display.service
 User=t-invest-bot
 Group=t-invest-bot
 Environment=DISPLAY=:99
-ExecStart=/usr/bin/openbox --display :99
+ExecStart=/usr/bin/openbox
 Restart=on-failure
 RestartSec=3
 UMask=0077
