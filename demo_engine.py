@@ -11,11 +11,17 @@ DEFAULT_RULES = {
     "fund": {"budget": 5000, "single_lot_cap": 10000, "position_cap": 30000},
     "future": {"margin_budget": 10000, "max_contracts": 2},
     "sell_percent": 100,
+    "sales": {
+        "stock": {"mode": "position", "budget": 30000, "single_lot_cap": 15000, "percent": 100},
+        "bond": {"mode": "position", "budget": 30000, "single_lot_cap": 10000, "percent": 100},
+        "fund": {"mode": "position", "budget": 30000, "single_lot_cap": 10000, "percent": 100},
+        "future": {"mode": "position", "margin_budget": 10000, "max_contracts": 2, "percent": 100},
+    },
 }
 
 
 def validated_rules(value: object) -> dict:
-    """Validate all fields together; unknown or fractional limits are rejected."""
+    """Validate all fields together and migrate legacy sale percentages."""
     if not isinstance(value, dict):
         raise ValueError("Некорректные торговые лимиты")
     result = {}
@@ -45,7 +51,43 @@ def validated_rules(value: object) -> dict:
     if type(percent) is not int or not 1 <= percent <= 100:
         raise ValueError("Доля продажи должна быть от 1 до 100%")
     result["sell_percent"] = percent
+    # Migrate existing installations without resetting their chosen close percentage.
+    sales = value.get("sales")
+    if sales is None:
+        sales = {asset: {**section, "percent": percent} for asset, section in DEFAULT_RULES["sales"].items()}
+    if not isinstance(sales, dict):
+        raise ValueError("Укажи отдельные лимиты продаж")
+    result["sales"] = {}
+    for asset in ("stock", "bond", "fund", "future"):
+        section = sales.get(asset)
+        if not isinstance(section, dict) or section.get("mode") not in {"amount", "position"}:
+            raise ValueError(f"Укажи режим продажи для {asset}")
+        result["sales"][asset] = {"mode": section["mode"]}
+        for key in (("margin_budget", "max_contracts", "percent") if asset == "future"
+                    else ("budget", "single_lot_cap", "percent")):
+            number = section.get(key)
+            maximum = 100 if key in {"max_contracts", "percent"} else 10_000_000
+            if type(number) is not int or not 1 <= number <= maximum:
+                raise ValueError(f"Лимит продажи {asset}.{key} должен быть целым числом от 1 до {maximum}")
+            result["sales"][asset][key] = number
     return result
+
+
+def sale_quantity(kind: str, rules: dict, held: int, available: int, unit_cost: Decimal) -> int:
+    """Whole lots only; both monetary and position/contract caps are hard limits."""
+    section = rules["sales"][kind]
+    budget_key = "margin_budget" if kind == "future" else "budget"
+    lot_cap = section["margin_budget"] if kind == "future" else section["single_lot_cap"]
+    if unit_cost > lot_cap:
+        raise ValueError("Стоимость лота / ГО контракта выше лимита продажи")
+    quantity = min(held, available, int(Decimal(section[budget_key]) // unit_cost))
+    if section["mode"] == "position":
+        quantity = min(quantity, held * section["percent"] // 100)
+    if kind == "future":
+        quantity = min(quantity, section["max_contracts"])
+    if quantity < 1:
+        raise ValueError("Лимит суммы или доля продажи меньше одного лота/контракта")
+    return quantity
 
 
 def asset_type(source_type: str, class_code: str) -> str | None:
@@ -99,22 +141,27 @@ def simulate(signal: dict, rules: dict, positions: dict) -> tuple[dict, dict]:
     if side == "sell":
         if held == 0:
             return block("Нет своей демо-позиции — продажа пропущена")
-        percent = rules["sell_percent"]
-        quantity = held if percent == 100 else held * percent // 100
-        if quantity < 1:
-            return block("Доля продажи меньше одного лота/контракта")
-        result.update(status="executed", reason=f"Закрыто {percent}% своей демо-позиции", quantity=quantity)
+        price = _money(signal.get("price"))
+        lot = signal.get("lot_size")
+        if asset == "future":
+            unit_cost = _money(signal.get("margin_rub") or current.get("margin_rub"))
+        elif price and type(lot) is int and lot > 0 and str(signal.get("currency") or "").lower() in {"rub", "rubles", "₽"}:
+            unit_cost = price * lot
+        else:
+            unit_cost = Decimal(0)
+        if not unit_cost:
+            return block("Нет рублёвой стоимости лота / ГО для проверки лимита продажи")
+        try:
+            quantity = sale_quantity(asset, rules, held, held, unit_cost)
+        except ValueError as error:
+            return block(str(error))
+        result.update(status="executed", reason=f"Продано {quantity} из {held} лот(ов) по лимитам продажи",
+                      quantity=quantity, amount_rub=_fmt(unit_cost * quantity))
         remaining = held - quantity
         if remaining:
             updated[key] = {**current, "quantity": remaining}
         else:
             updated.pop(key, None)
-        price = _money(signal.get("price"))
-        lot = signal.get("lot_size", 1)
-        if asset != "future" and type(lot) is int and lot > 0 and price:
-            result["amount_rub"] = _fmt(price * lot * quantity)
-        elif asset == "future":
-            result["amount_rub"] = _fmt(_money(current.get("margin_rub")) * quantity)
         return result, updated
 
     if asset == "future":

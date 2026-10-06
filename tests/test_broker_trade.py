@@ -37,7 +37,9 @@ def fake_api(*, cash="10000", balance="0", buy_max="100", sell_max="0", kind="st
         if method == "max_lots":
             return {"buyLimits": {"buyMaxLots": buy_max}, "sellLimits": {"sellMaxLots": sell_max}}
         if method == "order_price":
-            return {"totalOrderAmount": {"currency": "rub", "units": "1000", "nano": 0}}
+            return {"totalOrderAmount": {"currency": "rub", "units": "1000", "nano": 0},
+                    "initialOrderAmount": {"currency": "rub", "units": "990", "nano": 0},
+                    "extraBond": {"aciValue": {"currency": "rub", "units": "10", "nano": 0}}}
         if method == "margin":
             return {"initialMarginOnBuy": {"currency": "rub", "units": "9000", "nano": 0}}
         raise AssertionError(method)

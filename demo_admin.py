@@ -49,6 +49,7 @@ EVENTS: list[dict] = json.loads(EVENTS_PATH.read_text(encoding="utf-8")) if EVEN
 POSITIONS: dict = json.loads(POSITIONS_PATH.read_text(encoding="utf-8")) if POSITIONS_PATH.exists() else {}
 LOCK = threading.RLock()
 TRADE_FLOW_LOCK = threading.Lock()
+BROKER_REFRESH_LOCK = threading.Lock()
 HISTORY_REQUESTS = queue.Queue()
 MONITOR = {"status": "stopped", "message": "Мониторинг выключен", "last_check": None, "profile": "", "instrument_count": 0, "instruments": []}
 AUTH = {"status": "checking", "message": "Проверяем сохранённый вход в Пульс"}
@@ -194,6 +195,11 @@ def select_broker_account(account_id: str) -> dict:
 
 
 def refresh_broker() -> dict:
+    with BROKER_REFRESH_LOCK:
+        return _refresh_broker()
+
+
+def _refresh_broker() -> dict:
     token = broker_token()
     if not token:
         raise ValueError("Сначала подключи токен T-Invest")
@@ -206,9 +212,31 @@ def refresh_broker() -> dict:
             account_id = BROKER["selected_account_id"]
     snapshot = account_snapshot(token, account_id)
     with LOCK:
+        if BROKER["selected_account_id"] != account_id or broker_token() != token:
+            return BROKER.copy()
         BROKER.update(status="connected", message="Счёт обновлён · доступ только для чтения",
                       snapshot=snapshot, last_check=datetime.now(timezone.utc).isoformat())
         return BROKER.copy()
+
+
+def broker_refresh_once() -> None:
+    """Refresh the own account even while Pulse monitoring is stopped."""
+    if not broker_token():
+        return
+    try:
+        refresh_broker()
+    except (BrokerError, ValueError) as error:
+        with LOCK:
+            BROKER.update(status="error", message=str(error))
+
+
+def broker_monitor_loop() -> None:
+    while True:
+        try:
+            broker_refresh_once()
+        except Exception as error:
+            print(f"Не удалось обновить портфель: {type(error).__name__}")
+        time.sleep(30)
 
 
 def save_telegram_token(value: str) -> None:
@@ -520,6 +548,7 @@ def append_history_page(found: list[dict], page: dict, item: dict, profile: str,
             "ticker": item["ticker"], "classCode": item["classCode"], "name": item["showName"],
             "asset_type": kind, "action": trade.get("action"), "tradeDateTime": trade["tradeDateTime"],
             "price": trade.get("averagePrice"), "currency": trade.get("currency"),
+            "relative_yield": trade.get("relativeYield"),
             "can_demo_buy": kind in {"stock", "bond", "fund"} and trade.get("action") == "buy"
                             and trade_time >= datetime.now(timezone.utc) - timedelta(days=1),
         })
@@ -674,6 +703,7 @@ def poll_once(browser: PulseBrowser, settings: dict, *, emit_events: bool = True
             "classCode": item["classCode"], "asset_type": asset_type(item.get("type", ""), item["classCode"]),
             "side": side, "price": f"{trade.get('averagePrice', '—')} {trade.get('currency', '')}",
             "source": "pulse", "source_key": source_key, "trade": "не выставлялась",
+            "relative_yield": trade.get("relativeYield"),
         }
         if settings.get("real_mode") == "confirm":
             event.update(real_status="awaiting_approval", trade="Ожидает подтверждения",
@@ -1175,6 +1205,7 @@ def main() -> None:
         raise SystemExit(f"Админка уже запущена на порту {args.port} или порт занят") from error
     threading.Thread(target=monitor_loop, name="pulse-monitor", daemon=True).start()
     threading.Thread(target=reconcile_loop, name="broker-reconcile", daemon=True).start()
+    threading.Thread(target=broker_monitor_loop, name="broker-portfolio", daemon=True).start()
     print(f"Админка: http://127.0.0.1:{server.server_port}/")
     server.serve_forever()
 

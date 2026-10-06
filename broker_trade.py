@@ -13,6 +13,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from broker_read import BASE, BrokerError, money
+from demo_engine import sale_quantity
 
 METHODS = {
     "accounts": "UsersService/GetAccounts",
@@ -192,9 +193,29 @@ def prepare_order(signal: dict, rules: dict, token: str, account_id: str,
         quantity = min(copied_lots, own_lots, broker_lots)
         if quantity < 1:
             raise TradeError("Нет доступной позиции, купленной этим ботом, для продажи")
-        percent = rules["sell_percent"]
-        quantity = min(quantity, max(1, copied_lots * percent // 100))
-        amount = None
+        if kind == "future":
+            # We only close bot-owned long positions. The cap measures released
+            # buy-side collateral, not the contract's price in exchange points.
+            margin_data = call("margin", token, {"instrumentId": uid})
+            amount_value = margin_data.get("initialMarginOnBuy")
+        else:
+            preview = call("order_price", token, {"accountId": account_id, "instrumentId": uid,
+                                                  "price": quote, "direction": "ORDER_DIRECTION_SELL", "quantity": "1"})
+            amount_value = preview.get("initialOrderAmount")
+        if not isinstance(amount_value, dict) or str(amount_value.get("currency", "")).lower() != "rub":
+            raise TradeError("Брокер не вернул рублёвую стоимость продажи / ГО")
+        unit_cost = positive(money(amount_value), "стоимость продажи одного лота / ГО")
+        if kind == "bond":
+            extra = preview.get("extraBond")
+            nkd = extra.get("aciValue") if isinstance(extra, dict) else None
+            if not isinstance(nkd, dict) or str(nkd.get("currency", "")).lower() != "rub" or money(nkd) < 0:
+                raise TradeError("Брокер не вернул рублёвый НКД для лимита продажи облигации")
+            unit_cost += money(nkd)
+        try:
+            quantity = sale_quantity(kind, rules, copied_lots, quantity, unit_cost)
+        except ValueError as error:
+            raise TradeError(str(error)) from None
+        amount = str(unit_cost * quantity)
     else:
         broker_lots = limit("buyLimits", "buyMaxLots")
         if broker_lots < 1 or cash <= 0:
