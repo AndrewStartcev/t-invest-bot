@@ -1,4 +1,5 @@
 import io
+import hashlib
 import json
 import os
 import queue
@@ -17,7 +18,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 import demo_admin
-from broker_http import APIError, normalize_token, request_json
+from broker_http import APIError, broker_tls_context, normalize_token, request_json
 from pulse_live import PulseBrowser, PulseError, browser_executable
 from scripts.render_nginx import render
 from server_config import public_origin, validate_source_config
@@ -41,6 +42,53 @@ class ServerTests(unittest.TestCase):
         self.assertNotIn("private-token", str(failure.exception))
         self.assertNotIn("cookie", str(failure.exception))
         self.assertEqual(len(calls), 1)
+
+    def test_extra_broker_ca_preserves_system_trust_hostname_and_chain_checks(self):
+        root = Path(__file__).resolve().parents[1] / "deploy/certs/russian_trusted_root_ca.crt"
+        default_roots = set(ssl.create_default_context().get_ca_certs(binary_form=True))
+        with patch.dict(os.environ, {"TINVEST_BROKER_CA_FILE": str(root)}):
+            context = broker_tls_context()
+            roots = set(context.get_ca_certs(binary_form=True))
+            self.assertTrue(default_roots.issubset(roots))
+            expected = "d26d2d0231b7c39f92cc738512ba54103519e4405d68b5bd703e9788ca8ecf31"
+            self.assertIn(expected, {hashlib.sha256(cert).hexdigest() for cert in roots})
+            self.assertEqual(context.verify_mode, ssl.CERT_REQUIRED)
+            self.assertTrue(context.check_hostname)
+            calls = []
+            def opener(request, **options):
+                calls.append((request, options))
+                return io.BytesIO(b'{"accounts":[]}')
+            request_json("UsersService/GetAccounts", "private-token", {}, opener)
+            self.assertTrue(calls[0][0].full_url.startswith("https://invest-public-api.tbank.ru/"))
+            self.assertEqual(calls[0][1]["context"].verify_mode, ssl.CERT_REQUIRED)
+            self.assertTrue(calls[0][1]["context"].check_hostname)
+
+    def test_broken_extra_ca_fails_before_transmitting_token(self):
+        calls = []
+        with patch.dict(os.environ, {"TINVEST_BROKER_CA_FILE": "/nonexistent/ca-bundle"}), \
+                self.assertRaisesRegex(APIError, "Не удалось загрузить сертификаты"):
+            request_json("OrdersService/PostOrder", "private-token", {}, lambda *a, **kw: calls.append(a))
+        self.assertFalse(calls)
+
+    @unittest.skipIf(os.name == "nt", "Server certificate installer is bash")
+    def test_certificate_installer_rejects_a_valid_but_unexpected_ca(self):
+        import shutil
+        if not shutil.which("openssl"):
+            self.skipTest("openssl is unavailable")
+        project = Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            (root / "scripts").mkdir()
+            (root / "deploy/certs").mkdir(parents=True)
+            shutil.copyfile(project / "scripts/install_broker_ca.sh", root / "scripts/install_broker_ca.sh")
+            for kind in ["root", "sub"]:
+                # Substitute the legitimate root for the sub CA: valid PEM, wrong trust identity.
+                shutil.copyfile(project / "deploy/certs/russian_trusted_root_ca.crt",
+                                root / f"deploy/certs/russian_trusted_{kind}_ca.crt")
+            result = subprocess.run(["bash", str(root / "scripts/install_broker_ca.sh"), "--check-only"],
+                                    capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("Отпечаток sub CA не совпадает", result.stderr)
 
     def test_dns_tls_and_timeouts_have_distinct_diagnostics_and_no_retries(self):
         for error, message in [(socket.gaierror("dns"), "DNS"),

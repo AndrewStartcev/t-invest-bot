@@ -9,7 +9,7 @@ import sys
 from datetime import datetime, timezone
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from broker_http import APIError, network_error_message, normalize_token, request_json
+from broker_http import broker_tls_context, APIError, network_error_message, normalize_token, request_json
 
 
 def main():
@@ -19,16 +19,17 @@ def main():
     print("UTC:", datetime.now(timezone.utc).isoformat())
     print("Python:", sys.version.split()[0])
     print("Прокси в окружении:", "есть" if any(os.environ.get(name) for name in ("HTTPS_PROXY", "https_proxy", "ALL_PROXY", "all_proxy")) else "нет")
+    print("Дополнительные CA T-Invest:", "настроены" if os.environ.get("TINVEST_BROKER_CA_FILE") else "не настроены")
     host = "invest-public-api.tbank.ru"
     failed = False
     try:
         addresses = {item[4][0] for item in socket.getaddrinfo(host, 443, type=socket.SOCK_STREAM)}
         print("DNS:", ", ".join(sorted(addresses)))
         with socket.create_connection((host, 443), timeout=12) as sock:
-            with ssl.create_default_context().wrap_socket(sock, server_hostname=host) as secure:
+            with broker_tls_context().wrap_socket(sock, server_hostname=host) as secure:
                 print("Прямое TLS-соединение:", secure.version(), "· сертификат проверен")
-    except (OSError, TimeoutError) as error:
-        print("Сеть:", network_error_message(error))
+    except (APIError, OSError, TimeoutError) as error:
+        print("Сеть:", str(error) if isinstance(error, APIError) else network_error_message(error))
         failed = True
     if args.token:
         try:

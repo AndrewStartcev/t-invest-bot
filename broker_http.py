@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import socket
 import ssl
@@ -47,10 +48,23 @@ def http_error_message(error: HTTPError) -> str:
     return "T-Invest отклонил запрос" + suffix
 
 
+def broker_tls_context() -> ssl.SSLContext:
+    context = ssl.create_default_context()
+    extra_ca = os.environ.get("TINVEST_BROKER_CA_FILE", "")
+    if extra_ca:
+        try:
+            context.load_verify_locations(cafile=extra_ca)
+        except (OSError, ssl.SSLError):
+            raise APIError("Не удалось загрузить сертификаты T-Invest из TINVEST_BROKER_CA_FILE. Запусти scripts/install_broker_ca.sh на сервере") from None
+    return context
+
+
 def network_error_message(error: Exception) -> str:
     reason = error.reason if isinstance(error, URLError) else error
     if isinstance(reason, ssl.SSLCertVerificationError):
-        return "Ошибка проверки TLS-сертификата T-Invest. Проверь дату сервера и пакет ca-certificates; проверка сертификатов не отключается"
+        code = getattr(reason, "verify_code", None)
+        suffix = f" (код проверки {code})" if isinstance(code, int) else ""
+        return "Ошибка проверки TLS-сертификата T-Invest" + suffix + ". Для API на .ru нужны сертификаты НУЦ Минцифры: запусти scripts/install_broker_ca.sh. Также проверь дату сервера; проверка TLS остаётся включённой"
     if isinstance(reason, socket.gaierror):
         return "DNS не разрешает invest-public-api.tbank.ru. Проверь DNS сервера"
     if isinstance(reason, (TimeoutError, socket.timeout)):
@@ -68,7 +82,10 @@ def request_json(method: str, token: str, payload: dict, opener=urlopen) -> dict
         "Accept": "application/json", "User-Agent": "t-invest-bot/1.0",
     }, method="POST")
     try:
-        with opener(request, timeout=12) as response:
+        options = {"timeout": 12}
+        if os.environ.get("TINVEST_BROKER_CA_FILE"):
+            options["context"] = broker_tls_context()
+        with opener(request, **options) as response:
             result = json.load(response)
     except HTTPError as error:
         raise APIError(http_error_message(error)) from None

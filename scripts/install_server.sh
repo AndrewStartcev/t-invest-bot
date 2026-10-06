@@ -16,7 +16,7 @@ if [[ -f /etc/t-invest-bot/server.env ]] && ! grep -Fxq "TINVEST_PUBLIC_ORIGIN=h
     echo "Уже настроен другой домен. Проверь /etc/t-invest-bot/server.env" >&2; exit 1
 fi
 apt-get update
-apt-get install -y python3 python3-venv git nginx apache2-utils ca-certificates \
+apt-get install -y python3 python3-venv git nginx apache2-utils ca-certificates openssl \
     xvfb x11vnc openbox novnc websockify x11-utils x11-xkb-utils certbot python3-certbot-nginx
 update-ca-certificates
 if ! id t-invest-bot >/dev/null 2>&1; then
@@ -38,6 +38,7 @@ PYTHONUNBUFFERED=1
 EOF
 fi
 chmod 600 /etc/t-invest-bot/server.env
+bash "$PROJECT/scripts/install_broker_ca.sh"
 if [[ ! -f /etc/nginx/t-invest-bot.htpasswd ]]; then
     echo "Задай пароль входа в панель для пользователя admin:"
     htpasswd -cB /etc/nginx/t-invest-bot.htpasswd admin
