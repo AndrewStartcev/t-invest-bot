@@ -117,6 +117,15 @@ class ServerTests(unittest.TestCase):
                         with self.subTest(path=path, secret=secret), self.assertRaises(HTTPError) as failure:
                             request(path, post, secret)
                         self.assertEqual(failure.exception.code, 403)
+                for path in ["/source-admin", "/source-admin/https://invest.argokov.ru/source-admin/",
+                             "/source-admin/https%3A%2F%2Finvest.argokov.ru%2Fsource-admin%2F"]:
+                    with self.subTest(path=path), request(path, secret=key) as response:
+                        self.assertEqual(response.geturl(), base + "/source-admin/")
+                        self.assertEqual(response.status, 200)
+                        self.assertIn("Источник сделок Пульса", response.read().decode())
+                with self.assertRaises(HTTPError) as failure:
+                    request("/source-admin/https://evil.example/source-admin/", secret=key)
+                self.assertEqual(failure.exception.code, 404)
                 self.assertTrue(requests.empty())
                 with request("/api/state") as response:
                     client_state = json.load(response)

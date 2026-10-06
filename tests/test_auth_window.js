@@ -84,3 +84,15 @@ test('client settings remain accessible while the shared source is offline', () 
   assert.equal(h.elements.get('connect-pulse').hidden, true);
   assert.equal(h.elements.get('open-pulse').hidden, true);
 });
+
+
+test('personal mode still shows its login after loading settings', () => {
+  const h = harness();
+  h.context.document = {body: {style: {}}};
+  h.context.authDismissed = false;
+  const render = html.slice(html.indexOf('    function renderAuth(auth)'), html.indexOf('    function openConnectDialog()'));
+  vm.runInContext(render, h.context);
+  h.context.renderAuth({status: 'required', message: 'Нужен вход'});
+  assert.equal(h.elements.get('auth-screen').hidden, false);
+  assert.equal(h.elements.get('admin-app').inert, true);
+});

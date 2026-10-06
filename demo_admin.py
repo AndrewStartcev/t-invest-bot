@@ -15,7 +15,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import urlparse, unquote
 
 from broker_http import normalize_token
 from demo_engine import DEFAULT_RULES, asset_type, simulate, validated_rules
@@ -988,6 +988,21 @@ class Handler(BaseHTTPRequestHandler):
         if self.path.startswith("/source-admin"):
             if not self.source_authorized():
                 self.respond(403, {"error": "Доступ только владельцу источника"})
+                return
+            # Recover a same-site absolute URL accidentally appended as a relative path.
+            # Fixed relative Location never redirects to a user-supplied destination.
+            decoded_path = unquote(self.path)
+            source_path = decoded_path.split("?", 1)[0].split("#", 1)[0]
+            origin = public_origin()
+            duplicate = origin and source_path in {
+                f"/source-admin/{origin}/source-admin",
+                f"/source-admin/{origin}/source-admin/"}
+            if self.path == "/source-admin" or duplicate:
+                self.send_response(303)
+                self.send_header("Location", "/source-admin/")
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
                 return
             if self.path == "/source-admin/api/state":
                 with LOCK:

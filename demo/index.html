@@ -12,6 +12,7 @@
     button { cursor:pointer; }
     button:disabled { opacity:.45; cursor:not-allowed; }
     [hidden] { display:none!important; }
+    .startup-message { position:fixed; top:16px; left:50%; transform:translateX(-50%); z-index:20; max-width:calc(100% - 32px); padding:12px 18px; border:1px solid #e3e9f0; border-radius:8px; background:#fff; color:#61738c; font-size:13px; }
     .app { min-height:100vh; }
     .sidebar { position:fixed; inset:0 auto 0 0; width:230px; background:#142239; color:#c8d6e9; display:flex; flex-direction:column; padding:26px 16px; z-index:2; }
     .brand { display:flex; align-items:center; gap:11px; padding:0 10px 34px; color:#fff; font-size:16px; font-weight:780; letter-spacing:-.025em; }
@@ -146,7 +147,8 @@
   </style>
 </head>
 <body>
-  <div class="auth" id="auth-screen" role="dialog" aria-modal="true" aria-labelledby="auth-title">
+  <p class="startup-message" id="startup-message" role="status">Загружаем настройки панели…</p>
+  <div class="auth" id="auth-screen" hidden role="dialog" aria-modal="true" aria-labelledby="auth-title">
     <div class="auth-card">
       <div class="auth-top"><div class="brand"><span class="brand-mark">T</span><span>T-Invest Bot</span></div><button class="auth-close" type="button" id="auth-dismiss" aria-label="Закрыть окно подключения">×</button></div>
       <div class="auth-body">
@@ -177,7 +179,7 @@
       <div class="side-foot" id="panel-location"><b>Локальная панель</b>Данные сеанса остаются на этом компьютере</div>
     </aside>
     <main class="main">
-        <div class="topbar"><span class="breadcrumb">Пульс / <b id="breadcrumb">Обзор</b></span><div class="top-right"><a class="button neutral small" id="server-browser-top" target="_blank" rel="noopener noreferrer" hidden>Браузер Пульса</a><button class="button neutral small" type="button" id="connect-pulse">Подключить Пульс</button><span id="trade-top-status">Брокерские заявки отключены</span><span class="badge" id="mode-badge">Мониторинг выключен</span></div></div>
+        <div class="topbar"><span class="breadcrumb">Пульс / <b id="breadcrumb">Обзор</b></span><div class="top-right"><a class="button neutral small" id="server-browser-top" target="_blank" rel="noopener noreferrer" hidden>Браузер Пульса</a><button class="button neutral small" type="button" id="connect-pulse" hidden>Подключить Пульс</button><span id="trade-top-status">Брокерские заявки отключены</span><span class="badge" id="mode-badge">Мониторинг выключен</span></div></div>
       <div class="content">
         <section class="view active" id="view-overview">
           <div class="page-head"><div><h1>Обзор</h1><p class="subtle" id="profile-heading">Профиль Пульса</p></div><div class="live-status"><i class="dot" id="source-dot"></i><span id="source-status">Подключение</span></div></div>
@@ -225,7 +227,7 @@
               <label class="switch"><span><b>Автоматически повторять сделки · симуляция</b><small>Новые покупки и продажи проходят через лимиты. Продажа без своей условной позиции пропускается. Для акций, облигаций и фондов лот условно равен 1.</small></span><input id="auto-buy" type="checkbox"></label>
               <div class="field"><label for="real-mode">Реальная торговля</label><select id="real-mode"><option value="off">Выключена</option><option value="confirm">Подтверждать каждую заявку</option><option value="auto">Автоматически по лимитам</option></select><small>Нужен отдельный торговый токен и выбранный счёт. При реальной торговле симуляция выключается. Выключение режима не отменяет уже выставленные заявки.</small></div>
               <label class="switch"><span><b>Пауза уведомлений</b><small>Сигналы остаются в журнале</small></span><input id="paused" type="checkbox"></label>
-              <div class="form-actions"><button class="button" type="submit">Сохранить настройки</button><button class="button neutral" id="open-pulse" type="button">Открыть окно Пульса</button><span class="toast" id="settings-message" role="status"></span></div>
+              <div class="form-actions"><button class="button" type="submit">Сохранить настройки</button><button class="button neutral" id="open-pulse" type="button" hidden>Открыть окно Пульса</button><span class="toast" id="settings-message" role="status"></span></div>
             </form></section>
             <div class="stack">
               <section class="panel"><div class="panel-head"><h2>Брокерский счёт</h2><span class="tag">Только чтение</span></div><div class="panel-body"><p class="subtle">Собственный портфель обновляется каждые 30 секунд независимо от Пульса. Для рублёвых акций, облигаций и фондов показываем стоимость и долю от портфеля. Для фьючерсов и валютных позиций доля не рассчитывается. Этот токен читает остаток и позиции. Для выставления заявок нужен отдельный торговый токен ниже.</p><div class="field space-top"><label for="broker-token">Токен T-Invest</label><a href="https://www.tbank.ru/invest/settings/api/" target="_blank" rel="noopener noreferrer">Получить токен на tbank.ru</a><input id="broker-token" type="password" autocomplete="new-password" placeholder="Вставь токен только для чтения"><small id="broker-token-hint">Сохранённый токен здесь не отображается</small></div><div class="form-actions"><button class="button" id="broker-connect" type="button">Подключить</button><button class="button neutral" id="broker-refresh" type="button">Обновить счёт</button></div><div class="field space-top"><label for="broker-account">Счёт</label><select id="broker-account"></select></div><p class="toast space-top" id="broker-message" role="status"></p><div class="source-line"><span>Доступные рубли</span><b id="broker-cash">—</b></div><div class="source-line"><span>Стоимость портфеля</span><b id="broker-total">—</b></div><div class="source-line"><span>Позиции</span><b id="broker-position-count">—</b></div><div id="broker-positions" class="portfolio-list muted">Подключи счёт, чтобы увидеть позиции</div><small id="broker-updated">—</small></div></section>
@@ -262,6 +264,7 @@
     }
     function fmtDate(value) { try { return new Date(value).toLocaleString('ru-RU'); } catch { return '—'; } }
     function renderAuth(auth) {
+      el('startup-message').hidden = true;
       authStatus = auth.status;
       const ready = auth.status === 'authenticated';
       const showDialog = !sharedSource && !ready && !authDismissed;
@@ -537,7 +540,7 @@
       }catch(error){message.className='toast error';message.textContent=error.message;}
     });
     el('telegram-test').addEventListener('click',async()=>{const button=el('telegram-test'),message=el('telegram-test-result');button.disabled=true;try{const response=await api('/api/telegram/test',{});const sent=response.event.notification==='отправлено';message.className=sent?'toast space-top':'toast error space-top';message.textContent=response.event.notification;await refresh();}catch(error){message.className='toast error space-top';message.textContent=error.message;}finally{button.disabled=false;}});
-    load().catch(error=>{el('auth-message').textContent=error.message;});
+    load().catch(error=>{el('startup-message').hidden=false;el('startup-message').textContent='Не удалось загрузить панель: '+error.message+'. Обнови страницу.';});
     setInterval(()=>refresh().catch(()=>{}),3000);
   </script>
 </body>
