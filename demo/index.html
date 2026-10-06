@@ -126,6 +126,23 @@
     .demo-actions { display:flex; gap:9px; }
     .demo-actions button { flex:1; }
     .auth { position:fixed; inset:0; z-index:10; background:#14223999; backdrop-filter:blur(3px); display:grid; place-items:center; padding:22px; }
+    .overview-tools { display:flex; align-items:center; justify-content:flex-end; flex-wrap:wrap; gap:14px; }
+    .blogger-dialog { width:min(840px,calc(100% - 28px)); max-height:85dvh; padding:0; border:1px solid #e0e7f0; border-radius:18px; color:#18283f; background:#fff; box-shadow:0 28px 90px #14223935; }
+    .blogger-dialog::backdrop { background:#14223988; backdrop-filter:blur(4px); }
+    .blogger-dialog .panel-head { padding:18px 24px; }
+    .blogger-dialog .panel-head h2 { font-size:20px; }
+    .blogger-body { padding:24px; }
+    .blogger-grid { display:grid; grid-template-columns:280px minmax(0,1fr); gap:30px; margin:24px 0; align-items:center; }
+    .blogger-donut { width:260px; height:260px; margin:auto; border-radius:50%; display:grid; place-items:center; background:#e6edf5; }
+    .blogger-donut-center { width:184px; height:184px; border-radius:50%; background:#fff; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; padding:20px; }
+    .blogger-donut-center b { font-size:26px; }
+    .blogger-donut-center span { font-size:12px; line-height:1.4; color:#7b8da4; margin-top:5px; }
+    .blogger-legend { max-height:350px; overflow:auto; }
+    .blogger-row { display:flex; align-items:center; gap:10px; padding:11px 0; border-bottom:1px solid #edf1f5; font-size:13px; }
+    .blogger-row i { width:10px; height:10px; border-radius:50%; flex:none; }
+    .blogger-row span { flex:1; overflow-wrap:anywhere; }
+    .blogger-row b { white-space:nowrap; }
+    @media (max-width:600px) { .blogger-grid { grid-template-columns:1fr; gap:20px; } .blogger-body { padding:18px; } .blogger-dialog .panel-head { padding:16px 18px; } .overview-tools { justify-content:flex-start; } }
     .auth-card { width:min(100%,490px); background:#fff; border:1px solid #e0e7f0; border-radius:16px; box-shadow:0 26px 70px #1422391a; overflow:hidden; }
     .auth-top { background:#142239; padding:22px 26px; color:#fff; display:flex; align-items:center; justify-content:space-between; }
     .auth-top .brand { padding:0; }
@@ -175,6 +192,10 @@
       </div>
     </div>
   </div>
+  <dialog class="blogger-dialog" id="blogger-portfolio-dialog" aria-labelledby="blogger-portfolio-title">
+    <div class="panel-head"><h2 id="blogger-portfolio-title">Портфель блогера</h2><button class="button neutral small" type="button" id="blogger-portfolio-close" aria-label="Закрыть портфель блогера">Закрыть</button></div>
+    <div class="blogger-body"><p class="subtle" id="blogger-portfolio-message" role="status">Портфель ещё не проверен</p><div class="blogger-grid" id="blogger-portfolio-chart" hidden><div class="blogger-donut" id="blogger-portfolio-donut" role="img" aria-label="Доли видимых позиций автора"><div class="blogger-donut-center"><b id="blogger-visible-share">—</b><span>видимые доли портфеля</span></div></div><div class="blogger-legend" id="blogger-portfolio-legend"></div></div><p class="muted">Показаны последние прочитанные данные выбранного автора. Серая часть означает непрочитанные или скрытые доли. Диаграмма не показывает размер счёта и не доказывает отсутствие коротких позиций.</p></div>
+  </dialog>
   <div class="auth" id="order-confirm" role="dialog" aria-modal="true" aria-labelledby="order-title" hidden>
     <div class="auth-card"><div class="auth-top"><div class="brand"><span class="brand-mark">T</span><span>Реальная заявка</span></div><button class="auth-close" type="button" id="order-close" aria-label="Закрыть подтверждение">×</button></div>
       <div class="auth-body"><span class="eyebrow">Проверка перед отправкой</span><h1 id="order-title">Подтверди заявку</h1><p id="order-summary">Загружаем цену и лимиты…</p><div class="source-line"><span>Счёт</span><b id="order-account">—</b></div><div class="source-line"><span>Лоты</span><b id="order-quantity">—</b></div><div class="source-line"><span>Лимитная цена</span><b id="order-price">—</b></div><div class="source-line"><span>Оценка суммы / ГО</span><b id="order-amount">—</b></div><p class="muted space-top">Цена и доступное количество проверяются повторно при отправке. Исполнение заявки может быть частичным.</p><div class="form-actions"><button class="button" id="order-submit" type="button">Отправить реальную заявку</button><button class="button neutral" id="order-cancel" type="button">Отмена</button></div><p class="toast error space-top" id="order-message" role="status"></p></div>
@@ -195,7 +216,7 @@
         <div class="topbar"><span class="breadcrumb">Пульс / <b id="breadcrumb">Обзор</b></span><div class="top-right"><a class="button neutral small" id="server-browser-top" target="_blank" rel="noopener noreferrer" hidden>Браузер Пульса</a><button class="button neutral small" type="button" id="connect-pulse" hidden>Подключить Пульс</button><span id="trade-top-status">Брокерские заявки отключены</span><span class="badge" id="mode-badge">Мониторинг выключен</span></div></div>
       <div class="content">
         <section class="view active" id="view-overview">
-          <div class="page-head"><div><h1>Обзор</h1><p class="subtle" id="profile-heading">Профиль Пульса</p></div><div class="live-status"><i class="dot" id="source-dot"></i><span id="source-status">Подключение</span></div></div>
+          <div class="page-head"><div><h1>Обзор</h1><p class="subtle" id="profile-heading">Профиль Пульса</p></div><div class="overview-tools"><button class="button small" type="button" id="blogger-portfolio-open">Портфель блогера</button><div class="live-status"><i class="dot" id="source-dot"></i><span id="source-status">Подключение</span></div></div></div>
           <div class="cards">
             <div class="card"><span class="card-label">Покупки автора · 24 ч</span><strong id="source-buys">0</strong><small>Опубликованные сделки</small></div>
             <div class="card"><span class="card-label">Продажи автора · 24 ч</span><strong id="source-sells">0</strong><small>Опубликованные сделки</small></div>
@@ -423,6 +444,22 @@
       for(const row of (portfolio.rows||[]).slice(0,100)){
         const item=document.createElement('p');item.className='muted';item.textContent=row.name+' · '+row.percent+'%';target.append(item);
       }
+      let author='Блогер';try{author=decodeURIComponent(new URL(state.settings.profile_url).pathname.split('/').filter(Boolean).at(-1));}catch(_){}
+      el('blogger-portfolio-title').textContent=author+' · портфель';
+      el('blogger-portfolio-message').textContent=el('investor-portfolio-status').textContent;
+      const rows=(portfolio.rows||[]).map(row=>({...row,value:Number(row.percent)})).filter(row=>Number.isFinite(row.value)&&row.value>0&&row.value<=100);
+      const total=rows.reduce((sum,row)=>sum+row.value,0),valid=rows.length>0&&total<=100.000001;
+      const legend=el('blogger-portfolio-legend');legend.replaceChildren();
+      el('blogger-portfolio-chart').hidden=!valid;
+      if(!valid){if(rows.length)el('blogger-portfolio-message').textContent+=' · Диаграмма недоступна: сумма долей превышает 100%.';return;}
+      const colors=['#38bce6','#ffcf32','#9376d8','#91c96b','#ed7fa2','#4f9bb8','#f3a15e','#667fd1'];
+      let cursor=0;const segments=[];
+      function addLegend(name,value,color){const item=document.createElement('div');item.className='blogger-row';const dot=document.createElement('i');dot.style.background=color;const label=document.createElement('span');label.textContent=name;const amount=document.createElement('b');amount.textContent=value.toLocaleString('ru-RU',{maximumFractionDigits:2})+'%';item.append(dot,label,amount);legend.append(item);}
+      rows.forEach((row,index)=>{const color=colors[index%colors.length],end=Math.min(100,cursor+row.value);segments.push(color+' '+cursor+'% '+end+'%');cursor=end;addLegend(row.name,row.value,color);});
+      if(cursor<100){segments.push('#e6edf5 '+cursor+'% 100%');addLegend('Непрочитанная / скрытая часть',100-cursor,'#cbd6e3');}
+      el('blogger-portfolio-donut').style.background='conic-gradient('+segments.join(',')+')';
+      el('blogger-visible-share').textContent=total.toLocaleString('ru-RU',{maximumFractionDigits:2})+'%';
+      el('blogger-portfolio-donut').setAttribute('aria-label','Видимые доли портфеля '+author+': '+rows.map(row=>row.name+' '+row.percent+'%').join(', '));
     }
     function renderOperator(state){
       const box=el('operator-approvals');box.replaceChildren();
@@ -561,6 +598,9 @@
       catch(error){message.className='toast error space-top';message.textContent=error.message;}
       finally{button.disabled=false;}
     }
+    el('blogger-portfolio-open').addEventListener('click',()=>el('blogger-portfolio-dialog').showModal());
+    el('blogger-portfolio-close').addEventListener('click',()=>el('blogger-portfolio-dialog').close());
+    el('blogger-portfolio-dialog').addEventListener('click',event=>{if(event.target!==event.currentTarget)return;const rect=event.currentTarget.getBoundingClientRect();if(event.clientX<rect.left||event.clientX>rect.right||event.clientY<rect.top||event.clientY>rect.bottom)event.currentTarget.close();});
     el('broker-connect').addEventListener('click',()=>brokerAction('/api/broker/connect',{token:el('broker-token').value},el('broker-connect')));
     el('broker-refresh').addEventListener('click',()=>brokerAction('/api/broker/refresh',{},el('broker-refresh')));
     el('broker-account').addEventListener('change',()=>brokerAction('/api/broker/select',{account_id:el('broker-account').value},el('broker-account')));
