@@ -26,6 +26,7 @@ from server_config import public_origin, server_mode, shared_source, source_key,
 from pulse_live import PulseBrowser, PulseError, canonical_profile_url, operations_url
 from pulse_replay import write_state
 from shared_pulse import RemotePulse, read_source
+from monitor_schedule import DEFAULT_SCHEDULE, schedule_open, validate_schedule
 
 
 ROOT = Path(__file__).resolve().parent
@@ -49,6 +50,7 @@ DEFAULTS = {
     "auto_demo_buy": False,
     "real_mode": "off",
     "rules": DEFAULT_RULES,
+    "schedule": DEFAULT_SCHEDULE,
 }
 EVENTS: list[dict] = json.loads(EVENTS_PATH.read_text(encoding="utf-8")) if EVENTS_PATH.exists() else []
 POSITIONS: dict = json.loads(POSITIONS_PATH.read_text(encoding="utf-8")) if POSITIONS_PATH.exists() else {}
@@ -265,6 +267,7 @@ def load_settings() -> dict:
     # Navigate through the working mirror without deleting any saved settings.
     settings["profile_url"] = canonical_profile_url(settings["profile_url"])
     settings["rules"] = validated_rules(settings["rules"])
+    settings["schedule"] = validate_schedule(settings["schedule"])
     return settings
 
 
@@ -297,12 +300,14 @@ def save_settings(data: dict) -> dict:
     if real_mode != "off" and (not trade_token() or not TRADE_ACCOUNT_PATH.exists()):
         raise ValueError("Сначала подключи торговый токен и выбери счёт")
     rules = validated_rules(data.get("rules", DEFAULT_RULES))
+    schedule = validate_schedule(data.get("schedule", load_settings()["schedule"]))
     if "telegram_token" in data:
         if not isinstance(data["telegram_token"], str):
             raise ValueError("Некорректный токен Telegram")
         save_telegram_token(data["telegram_token"])
     settings = {"profile_url": url, "poll_seconds": seconds, "chat_id": chat_id, "paused": paused,
-                "monitoring_enabled": enabled, "auto_demo_buy": auto_buy, "real_mode": real_mode, "rules": rules}
+                "monitoring_enabled": enabled, "auto_demo_buy": auto_buy, "real_mode": real_mode,
+                "rules": rules, "schedule": schedule}
     SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
     temp = SETTINGS_PATH.with_suffix(".tmp")
     temp.write_text(json.dumps(settings, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -699,6 +704,8 @@ def poll_once(browser: PulseBrowser, settings: dict, *, emit_events: bool = True
         return
     matched_ids = set()
     for item, trade, sequence in sorted(fresh, key=lambda pair: pair[1]["tradeDateTime"]):
+        if not schedule_open(settings):
+            break
         side = trade["action"]
         source_key = f"{profile}:{item['ticker']}:{item['classCode']}:{sequence}"
         event = {
@@ -777,6 +784,28 @@ def handle_poll_error(browser: PulseBrowser, error: Exception, profile_url: str)
     return should_close
 
 
+def scheduled_poll(browser, settings, was_open):
+    if not schedule_open(settings):
+        with LOCK:
+            MONITOR.update(status="scheduled", message="Ожидание расписания · время по Москве")
+        return False
+    # Establish a new watermark after a scheduled break, without replaying missed trades.
+    poll_once(browser, settings, emit_events=settings["monitoring_enabled"]
+              and (was_open or not settings["schedule"]["enabled"]))
+    if not settings["monitoring_enabled"]:
+        with LOCK:
+            MONITOR.update(status="stopped", message="Уведомления выключены; данные профиля обновлены")
+    return True
+
+
+def scheduled_pause(settings):
+    if schedule_open(settings):
+        return False
+    with LOCK:
+        MONITOR.update(status="scheduled", message="Ожидание расписания · время по Москве")
+    return True
+
+
 def monitor_loop() -> None:
     browser = None
     month_scan = None
@@ -786,8 +815,12 @@ def monitor_loop() -> None:
     next_reconnect = 0.0
     reconnect_delay = 3.0
     source_cache = {}
+    schedule_was_open = False
     while True:
         settings = load_settings()
+        if scheduled_pause(settings):
+            schedule_was_open = False
+            next_poll = 0
         profile = operations_url(settings["profile_url"])[0].casefold()
         if last_profile != profile:
             if browser:
@@ -951,7 +984,7 @@ def monitor_loop() -> None:
         if (browser and time.monotonic() >= next_poll
                 and not (os.environ.get("TINVEST_WORKER_ROLE") == "source" and AUTH["status"] == "authenticated")):
             try:
-                poll_once(browser, settings, emit_events=settings["monitoring_enabled"])
+                schedule_was_open = scheduled_poll(browser, settings, schedule_was_open)
                 reconnect_delay = 3.0
                 if not settings["monitoring_enabled"]:
                     with LOCK:
@@ -966,6 +999,8 @@ def monitor_loop() -> None:
                     next_reconnect = time.monotonic() + reconnect_delay
                     reconnect_delay = min(reconnect_delay * 2, 60)
             next_poll = time.monotonic() + (settings["poll_seconds"] if AUTH["status"] == "authenticated" else 3)
+            if not schedule_was_open:
+                next_poll = time.monotonic() + 0.5
 
         if month_scan and browser and AUTH["status"] == "authenticated":
             try:
@@ -988,8 +1023,12 @@ def remote_monitor_loop() -> None:
     profile = None
     month_scan = None
     next_poll = 0
+    schedule_was_open = False
     while True:
         settings = load_settings()
+        if scheduled_pause(settings):
+            schedule_was_open = False
+            next_poll = 0
         if settings["profile_url"] != profile:
             profile = settings["profile_url"]
             browser = RemotePulse(profile)
@@ -1028,7 +1067,7 @@ def remote_monitor_loop() -> None:
                     request["ready"].set()
         if time.monotonic() >= next_poll:
             try:
-                poll_once(browser, settings, emit_events=settings["monitoring_enabled"])
+                schedule_was_open = scheduled_poll(browser, settings, schedule_was_open)
                 if not settings["monitoring_enabled"]:
                     MONITOR.update(status="stopped", message="Уведомления выключены; данные профиля обновлены")
             except Exception as error:
@@ -1037,6 +1076,8 @@ def remote_monitor_loop() -> None:
                     AUTH.update(status="required", message=message)
                     MONITOR.update(status="error", message=message)
             next_poll = time.monotonic() + settings["poll_seconds"]
+            if not schedule_was_open:
+                next_poll = time.monotonic() + 0.5
         if month_scan:
             try:
                 if AUTH["status"] != "authenticated":

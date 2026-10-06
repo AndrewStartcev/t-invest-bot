@@ -54,6 +54,13 @@
     .details-grid { display:grid; grid-template-columns:minmax(0,1.85fr) minmax(280px,.8fr); gap:20px; align-items:start; }
     .telegram-health { display:flex; align-items:center; gap:9px; padding:3px 0 9px; font-size:13px; font-weight:730; color:#283e5b; }
     .rule-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; margin:12px 0 20px; }
+    .schedule-box { margin:16px 0; padding:16px; border:1px solid #e1e8f0; border-radius:9px; background:#f9fbfd; }
+    .schedule-days { display:flex; flex-wrap:wrap; gap:8px; margin:12px 0 16px; }
+    .schedule-day { position:relative; cursor:pointer; }
+    .schedule-day input { position:absolute; opacity:0; width:1px; height:1px; }
+    .schedule-day span { display:block; padding:9px 12px; border:1px solid #d0dbe8; border-radius:7px; background:#fff; font-size:12px; font-weight:700; }
+    .schedule-day input:checked + span { color:#263047; border-color:#ffdd2d; background:#ffdd2d; }
+    .schedule-day input:focus-visible + span { outline:3px solid #4079ba55; outline-offset:2px; }
     .rule-box { border:1px solid #e3eaf2; border-radius:8px; padding:14px; background:#f9fbfd; }
     .rule-box h3 { font-size:12px; margin:0 0 12px; }
     .rule-box .field { margin-bottom:10px; }
@@ -219,6 +226,7 @@
             <section class="panel"><div class="panel-head"><h2>Мониторинг</h2><span class="tag">Один профиль</span></div><form class="panel-body" id="settings-form">
               <div class="field"><label for="profile">Ссылка на профиль Пульса</label><input id="profile" type="url" required autocomplete="off"></div>
               <label class="switch"><span><b>Мониторинг сделок Пульса</b><small>Читает новые сделки автора и показывает их в журнале.</small></span><input id="monitor-enabled" type="checkbox"></label>
+              <div class="schedule-box"><label class="switch"><span><b>Работать по расписанию</b><small>Дни недели и время по Москве · МСК, UTC+3</small></span><input id="schedule-enabled" type="checkbox"></label><div id="schedule-fields" hidden><div class="schedule-days" role="group" aria-label="Дни начала мониторинга"><label class="schedule-day"><input type="checkbox" name="schedule-day" value="0"><span>Пн</span></label><label class="schedule-day"><input type="checkbox" name="schedule-day" value="1"><span>Вт</span></label><label class="schedule-day"><input type="checkbox" name="schedule-day" value="2"><span>Ср</span></label><label class="schedule-day"><input type="checkbox" name="schedule-day" value="3"><span>Чт</span></label><label class="schedule-day"><input type="checkbox" name="schedule-day" value="4"><span>Пт</span></label><label class="schedule-day"><input type="checkbox" name="schedule-day" value="5"><span>Сб</span></label><label class="schedule-day"><input type="checkbox" name="schedule-day" value="6"><span>Вс</span></label></div><div class="field-row"><div class="field"><label for="schedule-start">Начало, МСК</label><input id="schedule-start" type="time" value="09:00" required></div><div class="field"><label for="schedule-end">Окончание, МСК</label><input id="schedule-end" type="time" value="19:00" required></div></div><p class="muted">Если окончание раньше начала, мониторинг продолжится на следующий день. После паузы бот отслеживает новые сделки; накопленные за перерыв автоматически не копирует.</p></div><p class="muted space-top">Без расписания мониторинг работает круглосуточно. Обновление портфеля и проверка выставленных заявок продолжаются во время паузы.</p></div>
               <div class="field-row"><div class="field"><label for="interval">Интервал проверки, сек.</label><input id="interval" type="number" min="30" max="3600" required><small>От 30 до 3600 секунд</small></div><div class="field"><label for="chat">Telegram ID получателя</label><input id="chat" type="text" inputmode="numeric" autocomplete="off" placeholder="Не указан"><small>Пустой ID — сообщения не отправляются</small></div></div>
               <div class="field"><label for="token">Токен Telegram-бота</label><input id="token" type="password" autocomplete="new-password" placeholder="Не задан"><small id="token-hint">Хранится только локально; сохранённый токен не показывается</small></div>
               <div class="field"><label>Лимиты покупок</label><small>Для реальной торговли проверь суммы перед включением. Фактическая стоимость лота и ГО берутся из API брокера.</small></div>
@@ -466,15 +474,15 @@
       renderBroker(state);renderTrading(state);
       const profile=new URL(state.settings.profile_url).pathname.split('/').filter(Boolean).at(-1);
       el('profile-heading').textContent=profile+' · профиль Пульса';el('source-profile').textContent=profile;
-      el('source-mode').textContent=realMode==='off'?(state.settings.monitoring_enabled?'Мониторинг включён':'Мониторинг выключен'):'Реальная торговля · '+(realMode==='auto'?'авто':'подтверждение');
-      el('mode-badge').textContent=realMode==='off'?(state.settings.monitoring_enabled?'Мониторинг включён':'Мониторинг выключен'):'Реальные заявки · '+(realMode==='auto'?'авто':'подтверждение');
+      el('source-mode').textContent=state.monitor.status==='scheduled'?'Ожидание расписания · МСК':realMode==='off'?(state.settings.monitoring_enabled?'Мониторинг включён':'Мониторинг выключен'):'Реальная торговля · '+(realMode==='auto'?'авто':'подтверждение');
+      el('mode-badge').textContent=state.monitor.status==='scheduled'?'Ожидание расписания · МСК':realMode==='off'?(state.settings.monitoring_enabled?'Мониторинг включён':'Мониторинг выключен'):'Реальные заявки · '+(realMode==='auto'?'авто':'подтверждение');
       el('trade-top-status').textContent=realMode==='off'?'Брокерские заявки отключены':'Реальная торговля включена';
       autoCopyEnabled=state.settings.auto_demo_buy;
       el('auto-copy-button').textContent=autoCopyEnabled?'Остановить автокопирование':'Включить автокопирование';
       el('auto-copy-button').className=autoCopyEnabled?'button neutral small':'button small';
       el('auto-copy-button').hidden=realMode!=='off';
       el('copy-note').textContent=realMode==='auto'?'Новые сделки проверяются по лимитам и отправляются брокеру лимитными заявками. Для прошлых покупок подготовь заявку кнопкой в строке.':realMode==='confirm'?'Новые сделки ожидают подтверждения в журнале. Для прошлых покупок подготовь заявку кнопкой в строке.':autoCopyEnabled?'Новые покупки и продажи повторяются условно по лимитам. Кнопки в строках позволяют обработать ранее опубликованные покупки за 24 часа. Реальных заявок нет.':'Кнопки в строках условно повторяют покупки за 24 часа. Автокопирование новых сделок выключено. Реальных заявок нет.';
-      el('source-status').textContent=state.auth.status!=='authenticated'?'Пульс не подключён':state.monitor.status==='error'?'Нужна проверка':state.settings.monitoring_enabled?'Мониторинг включён':'Мониторинг выключен';
+      el('source-status').textContent=state.monitor.status==='scheduled'?'Ожидание расписания · МСК':state.auth.status!=='authenticated'?'Пульс не подключён':state.monitor.status==='error'?'Нужна проверка':state.monitor.status==='scheduled'?'Ожидание расписания · МСК':state.settings.monitoring_enabled?'Мониторинг включён':'Мониторинг выключен';
       el('source-dot').className='dot'+(state.auth.status!=='authenticated'||state.monitor.status==='error'?' bad':state.monitor.status==='running'?' good':'');
       el('last-check').textContent=state.monitor.last_check?fmtDate(state.monitor.last_check):'—';
       el('source-message').textContent=state.auth.status==='authenticated'?state.monitor.message:state.auth.message;el('instrument-total').textContent=instruments.length;
@@ -507,6 +515,8 @@
       const state=await api('/api/state');
       el('profile').value=state.settings.profile_url;el('interval').value=state.settings.poll_seconds;el('chat').value=state.settings.chat_id;
       el('paused').checked=state.settings.paused;el('auto-buy').checked=state.settings.auto_demo_buy;el('monitor-enabled').checked=state.settings.monitoring_enabled;el('real-mode').value=state.settings.real_mode||'off';fillRules(state.settings.rules);
+      const schedule=state.settings.schedule||{enabled:false,days:[0,1,2,3,4],start:"09:00",end:"19:00"};
+      el("schedule-enabled").checked=schedule.enabled;el("schedule-fields").hidden=!schedule.enabled;el("schedule-start").value=schedule.start;el("schedule-end").value=schedule.end;document.querySelectorAll('[name="schedule-day"]').forEach(input=>{input.checked=schedule.days.includes(Number(input.value));});
       renderState(state);
       if(state.broker_token_configured&&state.broker.status==='disconnected')api('/api/broker/refresh',{}).then(refresh).catch(error=>el('broker-message').textContent=error.message);
       if(state.trade_token_configured&&state.trading.status==='disconnected')api('/api/trade/connect',{}).then(refresh).catch(error=>el('trade-message').textContent=error.message);
@@ -541,9 +551,10 @@
       catch(error){message.className='toast error space-top';message.textContent=error.message;}
       finally{button.disabled=false;}
     });
+    el("schedule-enabled").addEventListener("change",()=>{el("schedule-fields").hidden=!el("schedule-enabled").checked;});
     el('settings-form').addEventListener('submit',async event=>{
       event.preventDefault();const message=el('settings-message');
-      try{await api('/api/settings',{profile_url:el('profile').value,poll_seconds:Number(el('interval').value),chat_id:el('chat').value,telegram_token:el('token').value,paused:el('paused').checked,monitoring_enabled:el('monitor-enabled').checked,auto_demo_buy:el('auto-buy').checked,real_mode:el('real-mode').value,rules:ruleValues()});
+      try{await api('/api/settings',{profile_url:el('profile').value,poll_seconds:Number(el('interval').value),chat_id:el('chat').value,telegram_token:el('token').value,paused:el('paused').checked,monitoring_enabled:el('monitor-enabled').checked,auto_demo_buy:el('auto-buy').checked,real_mode:el('real-mode').value,rules:ruleValues(),schedule:{enabled:el("schedule-enabled").checked,days:[...document.querySelectorAll('[name="schedule-day"]:checked')].map(input=>Number(input.value)),start:el("schedule-start").value,end:el("schedule-end").value}});
         el('token').value='';message.className='toast';message.textContent='Настройки сохранены';await refresh();
       }catch(error){message.className='toast error';message.textContent=error.message;}
     });
