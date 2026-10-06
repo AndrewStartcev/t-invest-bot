@@ -49,8 +49,8 @@ def approval_reasons(signal, policy):
                     raise InvalidOperation()
                 if policy["yield_unit"] == "fraction":
                     profit *= 100
-                if profit < Decimal(policy["min_profit_percent"]):
-                    reasons.append(f"Прибыль инвестора {profit}% ниже {policy['min_profit_percent']}%")
+                if profit <= Decimal(policy["min_profit_percent"]):
+                    reasons.append(f"Прибыль инвестора {profit}% не выше {policy['min_profit_percent']}%")
             except (InvalidOperation, ValueError, TypeError):
                 reasons.append("Прибыль закрытия / единицы доходности Пульса не подтверждены")
     return reasons

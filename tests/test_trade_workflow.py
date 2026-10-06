@@ -35,8 +35,10 @@ class TradeWorkflowTests(unittest.TestCase):
         signal["investor_position"] = {"status": "verified", "present": False}
         self.assertEqual(approval_reasons(signal, policy), [])
         signal.update(side="sell", relative_yield="0.14")
-        self.assertIn("ниже", approval_reasons(signal, policy)[0])
+        self.assertIn("не выше", approval_reasons(signal, policy)[0])
         signal["relative_yield"] = "0.15"
+        self.assertTrue(approval_reasons(signal, policy))
+        signal["relative_yield"] = "0.150001"
         self.assertEqual(approval_reasons(signal, policy), [])
         signal.update(side="buy", investor_position={"status": "verified", "present": True}, relative_yield="-1")
         self.assertEqual(len(approval_reasons(signal, policy)), 2)
@@ -45,7 +47,8 @@ class TradeWorkflowTests(unittest.TestCase):
         policy = {**DEFAULT_POLICY, "enabled": True}
         self.assertTrue(approval_reasons({**self.signal(), "side": "sell", "relative_yield": "10"}, policy))
         policy["yield_unit"] = "fraction"
-        self.assertEqual(approval_reasons({**self.signal(), "side": "sell", "relative_yield": "0.0015"}, policy), [])
+        self.assertTrue(approval_reasons({**self.signal(), "side": "sell", "relative_yield": "0.0015"}, policy))
+        self.assertEqual(approval_reasons({**self.signal(), "side": "sell", "relative_yield": "0.00150001"}, policy), [])
         for value in ("NaN", "Infinity", None):
             self.assertTrue(approval_reasons({**self.signal(), "side": "sell", "relative_yield": value}, policy))
 
