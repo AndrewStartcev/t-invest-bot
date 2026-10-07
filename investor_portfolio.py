@@ -69,22 +69,42 @@ def parse_screen(screen, profile_url, instruments):
             exact_link = any(symbol.casefold() == ticker.casefold() and linked_kind == kind
                              for symbol, linked_kind in row["links"])
             # Company's displayed name can establish presence, but never absence of a security.
-            exact_name = wanted_name == row["name"] and Decimal(row["percent"]) != 0 and not row["links"]
+            exact_name = wanted_name == row["name"] and not row["links"]
             if exact_link or exact_name:
                 matched.append((row, exact_link))
         if matched:
             nonzero = any(Decimal(row["percent"]) != 0 for row, _ in matched)
-            # A rounded 0% is not proof of zero holdings. Only presence is verified here.
-            if nonzero:
-                positions[ticker + ":" + class_code] = {
-                    "status": "verified", "present": True, "percent": matched[0][0]["percent"],
-                    "evidence": "instrument_link" if any(link for _, link in matched) else "portfolio_name",
-                    "checked_at": result["checked_at"], "profile_url": profile_url}
+            visible_row = next((row for row, _ in matched if Decimal(row["percent"]) != 0), matched[0][0])
+            positions[ticker + ":" + class_code] = {
+                "status": "verified", "present": nonzero, "percent": visible_row["percent"],
+                "displayed_zero": not nonzero,
+                "evidence": "instrument_link" if any(link for _, link in matched) else "portfolio_name",
+                "checked_at": result["checked_at"], "profile_url": profile_url}
     if clean:
         result.update(status="partial", positions=positions,
                       rows=[{"name": row["name"], "percent": row["percent"]} for row in clean],
-                      message=f"Портфель автора прочитан: {len(clean)} строк. Отсутствующие, округлённые и скрытые позиции требуют подтверждения")
+                      message=f"Портфель автора прочитан: {len(clean)} строк. Видимые 0% исключены из проверки наличия; скрытые позиции требуют подтверждения")
     return result
+
+
+def compare_positions(current, previous):
+    """Compare displayed weights only; a weight change is not a quantity change."""
+    old_positions = previous.get("positions", {}) if isinstance(previous, dict) and previous.get("profile_url") == current.get("profile_url") else {}
+    for key, position in current.get("positions", {}).items():
+        position["weight_change"] = "unknown"
+        position.pop("previous_percent", None)
+        old = old_positions.get(key)
+        if not isinstance(old, dict) or old.get("status") != "verified" or position.get("status") != "verified":
+            continue
+        try:
+            before, after = Decimal(str(old.get("percent"))), Decimal(str(position.get("percent")))
+            if not before.is_finite() or not after.is_finite():
+                continue
+        except (InvalidOperation, ValueError, TypeError):
+            continue
+        position["previous_percent"] = str(before)
+        position["weight_change"] = "decreased" if after < before else "increased" if after > before else "unchanged"
+    return current
 
 
 # Runs inside the existing authenticated Playwright context, never in client browsers.

@@ -33,6 +33,7 @@ class TradeWorkflowTests(unittest.TestCase):
         self.assertEqual(approval_reasons(signal, DEFAULT_POLICY), [])
         self.assertTrue(approval_reasons(signal, policy))
         signal["investor_position"] = {"status": "verified", "present": False}
+        signal["relative_yield"] = "0.15"
         self.assertEqual(approval_reasons(signal, policy), [])
         signal.update(side="sell", relative_yield="0.14")
         self.assertIn("ниже", approval_reasons(signal, policy)[0])
@@ -44,7 +45,7 @@ class TradeWorkflowTests(unittest.TestCase):
         self.assertEqual(len(approval_reasons(signal, policy)), 2)
 
     def test_unconfirmed_yield_units_do_not_allow_automatic_sale(self):
-        policy = {**DEFAULT_POLICY, "enabled": True}
+        policy = {**DEFAULT_POLICY, "enabled": True, "confirm_remaining": False}
         self.assertTrue(approval_reasons({**self.signal(), "side": "sell", "relative_yield": "10"}, policy))
         policy["yield_unit"] = "fraction"
         self.assertTrue(approval_reasons({**self.signal(), "side": "sell", "relative_yield": "0.00149999"}, policy))
@@ -52,6 +53,25 @@ class TradeWorkflowTests(unittest.TestCase):
         self.assertEqual(approval_reasons({**self.signal(), "side": "sell", "relative_yield": "0.00150001"}, policy), [])
         for value in ("NaN", "Infinity", None):
             self.assertTrue(approval_reasons({**self.signal(), "side": "sell", "relative_yield": value}, policy))
+
+    def test_purchase_profit_is_checked_even_when_author_has_no_displayed_position(self):
+        policy = {**DEFAULT_POLICY, "enabled": True, "yield_unit": "percent"}
+        signal = {**self.signal(), "investor_position": {"status": "verified", "present": False, "percent": "0"}}
+        for value in ("0.14", "-1", None):
+            self.assertTrue(approval_reasons({**signal, "relative_yield": value}, policy))
+        self.assertEqual(approval_reasons({**signal, "relative_yield": "0.15"}, policy), [])
+
+    def test_remaining_position_after_sell_requires_confirmation_above_profit_threshold(self):
+        policy = {**DEFAULT_POLICY, "enabled": True, "yield_unit": "percent"}
+        signal = {**self.signal(), "side": "sell", "relative_yield": "1", "investor_position": {
+            "status": "verified", "present": True, "percent": "5", "previous_percent": "10", "weight_change": "decreased"}}
+        self.assertIn("с 10% до 5%", approval_reasons(signal, policy)[0])
+        signal["investor_position"]["weight_change"] = "unchanged"
+        self.assertIn("не подтверждено", approval_reasons(signal, policy)[0])
+        signal["investor_position"] = {"status": "unavailable"}
+        self.assertIn("неизвестен", approval_reasons(signal, policy)[0])
+        signal["investor_position"] = {"status": "verified", "present": False, "percent": "0"}
+        self.assertEqual(approval_reasons(signal, policy), [])
 
     def test_invalid_rules_rejected(self):
         for change in [{"position_percent": 0}, {"position_percent": True}, {"min_profit_percent": "NaN"},

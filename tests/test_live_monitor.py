@@ -33,6 +33,31 @@ class FakeBrowser:
 
 
 class LiveMonitorTests(unittest.TestCase):
+    def test_portfolio_snapshots_survive_restart_and_are_compared_before_signals(self):
+        from investor_portfolio import parse_screen
+        profile = canonical_profile_url(demo_admin.DEFAULTS["profile_url"])
+        browser = FakeBrowser()
+        def portfolio(url, instruments):
+            return parse_screen({"url": profile, "heading": "LinMath. Портфель", "portfolio": True,
+                                 "rows": [{"text": f"Тест {browser.weight}%", "links": []}]}, profile, instruments)
+        browser.portfolio = portfolio
+        settings = {**demo_admin.DEFAULTS, "policy": {**demo_admin.DEFAULT_POLICY, "enabled": True}}
+        with tempfile.TemporaryDirectory() as folder, \
+                patch.object(demo_admin, "STATE_PATH", Path(folder) / "state.json"), \
+                patch.object(demo_admin, "INVESTOR_PORTFOLIO", {}), \
+                patch.object(demo_admin, "AUTH", {}), patch.object(demo_admin, "MONITOR", {}), \
+                patch.object(demo_admin, "TODAY", []), patch.object(demo_admin, "recent_profile_trades", return_value=[]):
+            browser.weight = 10
+            demo_admin.poll_once(browser, settings, emit_events=False)
+            demo_admin.INVESTOR_PORTFOLIO.clear()  # Simulate losing in-memory state on restart.
+            browser.weight = 5
+            demo_admin.poll_once(browser, settings, emit_events=False)
+            current = demo_admin.INVESTOR_PORTFOLIO["positions"]["DEMO:TQBR"]
+            self.assertEqual(current["previous_percent"], "10")
+            self.assertEqual(current["weight_change"], "decreased")
+            persisted = json.loads(demo_admin.STATE_PATH.read_text())["_portfolios"][profile]
+            self.assertEqual(persisted["positions"]["DEMO:TQBR"]["percent"], "5")
+
     def test_history_accepts_encoded_pulse_ticker(self):
         browser = PulseBrowser(Path("unused"))
         browser.list_url = "https://www.tbank.ru/api/profile/instrument?sessionId=test"

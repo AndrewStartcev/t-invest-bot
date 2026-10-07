@@ -26,7 +26,7 @@ from server_config import public_origin, server_mode, shared_source, source_key,
 from pulse_live import PulseBrowser, PulseError, canonical_profile_url, operations_url
 from pulse_replay import write_state
 from shared_pulse import RemotePulse, read_source
-from investor_portfolio import unavailable as portfolio_unavailable
+from investor_portfolio import unavailable as portfolio_unavailable, compare_positions
 from monitor_schedule import DEFAULT_SCHEDULE, schedule_open, validate_schedule
 from trade_policy import DEFAULT_POLICY, validate_policy, approval_reasons, plan_identity
 from trade_approvals import Approvals, fingerprint
@@ -807,6 +807,9 @@ def advance_month_scan(browser: PulseBrowser, scan: dict, batch_size: int = 1) -
 def poll_once(browser: PulseBrowser, settings: dict, *, emit_events: bool = True) -> None:
     settings = {**DEFAULTS, **settings}
     state = json.loads(STATE_PATH.read_text(encoding="utf-8")) if STATE_PATH.exists() else {}
+    previous_portfolios = state.get("_portfolios", {})
+    if not isinstance(previous_portfolios, dict):
+        raise PulseError("Сохранённые снимки портфеля повреждены")
     profile, _ = operations_url(settings["profile_url"])
     previous = state.get(profile, {})
     profile, instruments = browser.snapshot(settings["profile_url"], previous)
@@ -819,6 +822,7 @@ def poll_once(browser: PulseBrowser, settings: dict, *, emit_events: bool = True
                 portfolio = portfolio_unavailable(settings["profile_url"])
         except Exception:
             portfolio = portfolio_unavailable(settings["profile_url"])
+    compare_positions(portfolio, previous_portfolios.get(canonical_profile_url(settings["profile_url"])))
     with LOCK:
         INVESTOR_PORTFOLIO.clear()
         INVESTOR_PORTFOLIO.update(portfolio)
@@ -851,6 +855,7 @@ def poll_once(browser: PulseBrowser, settings: dict, *, emit_events: bool = True
                 fresh.append((item, trade, sequence))
         updates[key] = count
     state[profile] = {**previous, **updates}
+    state["_portfolios"] = {**previous_portfolios, canonical_profile_url(settings["profile_url"]): portfolio}
     # Commit the watermark before side effects: a retry cannot create a second demo purchase.
     write_state(STATE_PATH, state)
     try:

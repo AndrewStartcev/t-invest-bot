@@ -2,7 +2,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock
 
-from investor_portfolio import parse_screen, read_visible_portfolio
+from investor_portfolio import parse_screen, read_visible_portfolio, compare_positions
 from pulse_live import PulseBrowser, canonical_profile_url
 from shared_pulse import read_source, RemotePulse
 
@@ -30,12 +30,27 @@ class InvestorPortfolioTests(unittest.TestCase):
         self.assertEqual(wrong["positions"], {})
 
     def test_hidden_zero_ambiguous_and_post_rows_are_not_holdings(self):
-        for text in ("Роснефть 0%", "Другое 20,07%", "Роснефть 1% +2%", "Роснефть 101%", "Роснефть"):
+        for text in ("Другое 20,07%", "Роснефть 1% +2%", "Роснефть 101%", "Роснефть"):
             with self.subTest(text=text):
                 self.assertEqual(parse_screen(self.screen(text), PROFILE, INSTRUMENTS)["positions"], {})
         screen = self.screen()
         screen["portfolio"] = False
         self.assertEqual(parse_screen(screen, PROFILE, INSTRUMENTS)["status"], "unavailable")
+
+    def test_displayed_zero_is_excluded_but_missing_position_is_unknown(self):
+        snapshot = parse_screen(self.screen("Роснефть 0%"), PROFILE, INSTRUMENTS)
+        self.assertFalse(snapshot["positions"]["ROSN:TQBR"]["present"])
+        self.assertTrue(snapshot["positions"]["ROSN:TQBR"]["displayed_zero"])
+        self.assertNotIn("GAZP:TQBR", snapshot["positions"])
+
+    def test_compare_displayed_weights_does_not_mix_authors(self):
+        before = parse_screen(self.screen("Роснефть 10%"), PROFILE, INSTRUMENTS)
+        current = parse_screen(self.screen("Роснефть 5%"), PROFILE, INSTRUMENTS)
+        compare_positions(current, before)
+        self.assertEqual(current["positions"]["ROSN:TQBR"]["weight_change"], "decreased")
+        self.assertEqual(current["positions"]["ROSN:TQBR"]["previous_percent"], "10")
+        compare_positions(current, {**before, "profile_url": PROFILE.replace("LinMath", "Other")})
+        self.assertEqual(current["positions"]["ROSN:TQBR"]["weight_change"], "unknown")
 
     def test_wrong_author_host_and_route_are_rejected(self):
         for url in (PROFILE.replace("LinMath", "Other"), PROFILE.replace("www.tbank-online.com", "evil.example"),
