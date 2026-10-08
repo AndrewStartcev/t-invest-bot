@@ -832,7 +832,7 @@ def poll_once(browser: PulseBrowser, settings: dict, *, emit_events: bool = True
     session_warning = False
     if isinstance(browser, PulseBrowser):
         try:
-            browser.save_session()
+            browser.confirm_session()
         except Exception:
             session_warning = True
     if not isinstance(previous, dict):
@@ -963,7 +963,7 @@ def handle_poll_error(browser: PulseBrowser, error: Exception, profile_url: str)
     with LOCK:
         MONITOR.update(status="error", message=message)
         if login_needed:
-            AUTH.update(status="required" if browser.headless else "waiting", message=message)
+            AUTH.update(status="waiting", message=message + "; восстанавливаем вход автоматически")
         elif not isinstance(error, PulseError) and AUTH["status"] != "authenticated":
             AUTH.update(status="required" if browser.headless else "waiting", message=message)
         elif AUTH["status"] == "authenticated":
@@ -972,9 +972,17 @@ def handle_poll_error(browser: PulseBrowser, error: Exception, profile_url: str)
         recovered = browser.recover_page()
     except Exception:
         recovered = False
-    should_close = not recovered or (browser.headless and (login_needed or not isinstance(error, PulseError)))
+    should_close = not recovered or (browser.headless and not isinstance(error, PulseError))
+    if not recovered and login_needed:
+        with LOCK:
+            AUTH.update(status="required", message=message)
     if not should_close and (login_needed or not isinstance(error, PulseError)):
         browser.list_url = None
+        if isinstance(browser, PulseBrowser):
+            try:
+                browser.refresh(profile_url)
+            except Exception:
+                return True
     return should_close
 
 
@@ -1006,6 +1014,7 @@ def monitor_loop() -> None:
     last_profile = None
     next_poll = 0.0
     next_ui_probe = 0.0
+    next_session_maintenance = time.monotonic() + 600
     next_reconnect = 0.0
     reconnect_delay = 3.0
     source_cache = {}
@@ -1052,7 +1061,7 @@ def monitor_loop() -> None:
                         request["result"] = cached[1]
                     else:
                         request["result"] = read_source(browser, request["payload"])
-                        browser.save_session()
+                        browser.confirm_session()
                         source_cache = {key: value for key, value in source_cache.items()
                                         if value[0] > time.monotonic()}
                         if len(source_cache) < 256:
@@ -1104,6 +1113,7 @@ def monitor_loop() -> None:
                         if handle_poll_error(browser, error, request["payload"]["profile_url"]):
                             browser.close()
                             browser = None
+                            next_reconnect = time.monotonic() + 60
                 elif request["action"] == "history":
                     request["error"] = str(error) if isinstance(error, PulseError) else "История не загрузилась"
                 elif request["action"] == "month":
@@ -1122,7 +1132,8 @@ def monitor_loop() -> None:
             with LOCK:
                 AUTH.update(status="required", message="Первое подключение: нажми «Войти в Т-Банк»")
 
-        if browser is None and AUTH["status"] in {"checking", "authenticated"} and time.monotonic() >= next_reconnect:
+        if (browser is None and AUTH["status"] in {"checking", "authenticated", "required", "waiting"}
+                and (DATA_DIR / "pulse-browser").exists() and time.monotonic() >= next_reconnect):
             try:
                 browser = PulseBrowser(DATA_DIR / "pulse-browser", headless=True)
                 browser.open(settings["profile_url"])
@@ -1139,12 +1150,30 @@ def monitor_loop() -> None:
                 next_reconnect = time.monotonic() + reconnect_delay
                 reconnect_delay = min(reconnect_delay * 2, 60)
 
-        if browser and AUTH["status"] in {"waiting", "required"} and not browser.list_url:
+        # Independent from trading hours, monitoring switches and client requests.
+        if isinstance(browser, PulseBrowser) and time.monotonic() >= next_session_maintenance:
+            next_session_maintenance = time.monotonic() + 600
+            try:
+                browser.maintain_session(settings["profile_url"])
+                print("Пульс: обслуживание браузерного сеанса выполнено", flush=True)
+                source_cache.clear()
+                next_poll = 0
+            except Exception as error:
+                if handle_poll_error(browser, error, settings["profile_url"]):
+                    browser.close()
+                    browser = None
+                    next_reconnect = time.monotonic() + 60
+
+        if browser and AUTH["status"] in {"waiting", "required", "checking"} and not browser.list_url:
             try:
                 if not browser.recover_page():
                     raise PulseError("Окно Пульса закрыто")
                 browser.page.wait_for_timeout(250)
                 if time.monotonic() >= next_ui_probe:
+                    if isinstance(browser, PulseBrowser) and browser.try_quick_login():
+                        print("Пульс: отправлен код быстрого доступа; ожидаем вход", flush=True)
+                        with LOCK:
+                            AUTH.update(status="waiting", message="Быстрый код отправлен; ждём подтверждения входа")
                     if browser.return_to_trades_after_login(settings["profile_url"]):
                         with LOCK:
                             AUTH.update(status="waiting", message="Вход завершён, открываем сделки автора")
@@ -1173,6 +1202,7 @@ def monitor_loop() -> None:
                     except Exception:
                         pass
                     browser = None
+                    next_reconnect = time.monotonic() + 60
             continue
 
         if (browser and time.monotonic() >= next_poll

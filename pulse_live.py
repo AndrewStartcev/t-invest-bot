@@ -272,9 +272,67 @@ class PulseBrowser:
         self.page = next((page for page in reversed(pages) if "/operations/" in page.url.split("?")[0]), pages[-1])
         return True
 
+    def try_quick_login(self) -> bool:
+        """Submit only the bank's explicitly identified quick-access PIN screen, once.
+
+        The durable latch prevents wrong-PIN retries across browser/service restarts.
+        It is cleared only after authenticated data has been read successfully.
+        """
+        pin = os.environ.get("PULSE_QUICK_PIN", "")
+        if not re.fullmatch(r"[0-9]{4}", pin) or not self.context:
+            return False
+        latch = self.profile_dir / "quick-login-attempted"
+        if latch.exists():
+            return False
+        for page in self.context.pages:
+            parsed = urlparse(page.url)
+            if (page.is_closed() or parsed.scheme != "https" or
+                    parsed.hostname not in PULSE_PROFILE_HOSTS | {"id.tbank.ru", "id.tbank-online.com"}):
+                continue
+            body = page.locator("body").inner_text(timeout=3000).casefold()
+            if ("код быстрого доступа" not in body or
+                    any(word in body for word in ("неверный код", "неправильный код", "код из смс", "код из sms"))):
+                continue
+            fields = page.locator('input[maxlength="4"][type="password"], '
+                                  'input[maxlength="4"][inputmode="numeric"], '
+                                  'input[maxlength="4"][type="tel"]')
+            visible = [fields.nth(i) for i in range(fields.count()) if fields.nth(i).is_visible()]
+            if len(visible) != 1:
+                continue
+            # Record before sending: a timeout after submission must not cause retries.
+            latch.touch(mode=0o600, exist_ok=False)
+            field = visible[0]
+            field.fill("", timeout=3000)
+            field.press_sequentially(pin, delay=100, timeout=3000)
+            # Many PIN screens submit automatically after four digits. Do not press
+            # Enter or another button: it could submit a subsequent SMS form.
+            return True
+        return False
+
+    def confirm_session(self) -> None:
+        self.save_session()
+        (self.profile_dir / "quick-login-attempted").unlink(missing_ok=True)
+
+    def maintain_session(self, profile_url: str) -> bool:
+        """Read-only browser activity; never scan trades or generate broker orders."""
+        if not self.recover_page():
+            raise PulseError("Окно Пульса закрыто")
+        attempted = self.try_quick_login()
+        if attempted:
+            return True  # Let the bank complete its redirect before navigating.
+        parsed = urlparse(self.page.url)
+        if parsed.scheme == "https" and parsed.hostname in PULSE_PROFILE_HOSTS:
+            self.page.bring_to_front()
+            self.page.evaluate("() => { window.scrollBy(0, 250); window.scrollBy(0, -250); }")
+            # Navigation lets the site's own auth/session refresh code run. Scrolling
+            # alone is not proof that a bank session has been extended.
+            self.refresh(profile_url)
+            self.save_session()
+        return attempted
+
     def return_to_trades_after_login(self, profile_url: str) -> bool:
         """Return from T-Bank's sign-in flow without asking for a manual check."""
-        if self.headless or not self.context or not self.recover_page():
+        if not self.context or not self.recover_page():
             return False
         pages = [page for page in self.context.pages if not page.is_closed()]
         login_open = any(urlparse(page.url).hostname in {"id.tbank.ru", "id.tbank-online.com"}

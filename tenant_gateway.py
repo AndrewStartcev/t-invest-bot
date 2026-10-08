@@ -98,6 +98,7 @@ class Manager:
                 env = {**os.environ, "TINVEST_SOURCE_RPC_URL": f"http://127.0.0.1:{self.source.port}",
                        "TINVEST_SOURCE_RPC_KEY": self.source.key,
                        "TINVEST_SOURCE_KEY": secrets.token_hex(32)}
+                env.pop("PULSE_QUICK_PIN", None)
                 self.workers[user] = Worker("client", directory, env, self.runtime)
             self.workers[user].start()
             return self.workers[user]
