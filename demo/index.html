@@ -311,7 +311,7 @@
       <div class="content">
         <section class="view active" id="view-overview">
 <div class="page-head"><div><h1>Обзор</h1><p class="subtle">Автор, найденные сделки и результаты обработки</p></div><button class="button neutral" type="button" id="overview-settings">Настройки</button></div>
-<section class="author-hero"><div><span class="hero-eyebrow">Отслеживаемый автор</span><h2 id="profile-heading">Профиль Пульса</h2><div class="hero-badges"><span class="badge" id="mode-badge">Мониторинг выключен</span></div></div><div class="hero-meta"><span id="overview-updated">Данные ещё не получены</span><span id="overview-schedule">Расписание не задано</span><a class="button neutral small" id="author-profile-link" target="_blank" rel="noopener noreferrer">Открыть в Пульсе ↗</a></div></section>
+<section class="author-hero"><div><span class="hero-eyebrow">Отслеживаемый автор</span><h2 id="profile-heading">Профиль Пульса</h2><div class="hero-badges"><span class="badge" id="mode-badge">Мониторинг выключен</span></div></div><div class="hero-meta"><button class="button" type="button" id="refresh-author">Обновить</button><span id="overview-updated">Данные ещё не получены</span><span id="overview-schedule">Расписание не задано</span><a class="button neutral small" id="author-profile-link" target="_blank" rel="noopener noreferrer">Открыть в Пульсе ↗</a></div></section>
 <div class="cards">
             <div class="card"><span class="card-label">Покупки автора · 24 ч</span><strong id="source-buys">0</strong><small>Опубликованные сделки</small></div>
             <div class="card"><span class="card-label">Продажи автора · 24 ч</span><strong id="source-sells">0</strong><small>Опубликованные сделки</small></div>
@@ -477,12 +477,18 @@
     el('auth-button').addEventListener('click', startAuth);
     el('auth-show').addEventListener('click', () => api('/api/auth/start', {}).catch(error => el('auth-message').textContent = error.message));
     el('open-pulse').addEventListener('click', openConnectDialog);
-    el('refresh-source').addEventListener('click', async () => {
-      const button = el('refresh-source'); button.disabled = true;
-      try { if (sharedSource) { await api('/api/source/refresh', {}); await refresh(); return; } if (authStatus !== 'authenticated' && authStatus !== 'waiting') { openConnectDialog(); return; } await api('/api/auth/check', {}); el('source-message').textContent = 'Обновляем данные Пульса…'; }
-      catch (error) { el('source-message').textContent = error.message; }
-      finally { setTimeout(() => button.disabled = false, 3000); }
-    });
+    async function refreshAuthor(){
+      const buttons=[el('refresh-source'),el('refresh-author')];buttons.forEach(button=>button.disabled=true);
+      el('refresh-author').textContent='Обновляем…';
+      try{
+        if(sharedSource){await api('/api/source/refresh',{});await refresh();return;}
+        if(authStatus!=='authenticated'&&authStatus!=='waiting'){openConnectDialog();return;}
+        await api('/api/auth/check',{});await refresh();
+      }catch(error){el('source-message').textContent=error.message;el('overview-progress').textContent=error.message;}
+      finally{setTimeout(()=>{buttons.forEach(button=>button.disabled=false);el('refresh-author').textContent='Обновить';},3000);}
+    }
+    el('refresh-source').addEventListener('click',refreshAuthor);
+    el('refresh-author').addEventListener('click',refreshAuthor);
     function renderToday() {
       const box=el('today-list'); box.replaceChildren();
       const items=monthView?(month.status==='ready'?month.items:[]):today;
@@ -831,8 +837,8 @@
     el("schedule-enabled").addEventListener("change",()=>{el("schedule-fields").hidden=!el("schedule-enabled").checked;});
     el('settings-form').addEventListener('submit',async event=>{
       event.preventDefault();if(!validateSettings())return;const message=el('settings-message');
-      try{await api('/api/settings',{profile_url:el('profile').value,poll_seconds:Number(el('interval').value),chat_id:el('chat').value,telegram_token:el('token').value,paused:el('paused').checked,monitoring_enabled:el('monitor-enabled').checked,auto_demo_buy:el('auto-buy').checked,real_mode:el('real-mode').value,rules:ruleValues(),policy:{telegram_controls:el("policy-telegram").checked,short_simulation:el("policy-short-demo").checked,enabled:el("policy-enabled").checked,confirm_existing:el("policy-existing").checked,confirm_low_profit:el("policy-profit").checked,min_profit_percent:el("policy-threshold").value,yield_unit:el("policy-yield-unit").value,confirm_remaining:el("policy-remaining").checked,position_cap_enabled:el("policy-position-cap").checked,position_percent:Number(el("policy-position-percent").value)},schedule:{enabled:el("schedule-enabled").checked,days:[...document.querySelectorAll('[name="schedule-day"]:checked')].map(input=>Number(input.value)),start:el("schedule-start").value,end:el("schedule-end").value}});
-        el('token').value='';message.className='toast';message.textContent='Настройки сохранены';await refresh();
+      try{const saved=await api('/api/settings',{profile_url:el('profile').value,poll_seconds:Number(el('interval').value),chat_id:el('chat').value,telegram_token:el('token').value,paused:el('paused').checked,monitoring_enabled:el('monitor-enabled').checked,auto_demo_buy:el('auto-buy').checked,real_mode:el('real-mode').value,rules:ruleValues(),policy:{telegram_controls:el("policy-telegram").checked,short_simulation:el("policy-short-demo").checked,enabled:el("policy-enabled").checked,confirm_existing:el("policy-existing").checked,confirm_low_profit:el("policy-profit").checked,min_profit_percent:el("policy-threshold").value,yield_unit:el("policy-yield-unit").value,confirm_remaining:el("policy-remaining").checked,position_cap_enabled:el("policy-position-cap").checked,position_percent:Number(el("policy-position-percent").value)},schedule:{enabled:el("schedule-enabled").checked,days:[...document.querySelectorAll('[name="schedule-day"]:checked')].map(input=>Number(input.value)),start:el("schedule-start").value,end:el("schedule-end").value}});
+        el('profile').value=saved.settings.profile_url;el('token').value='';message.className='toast';message.textContent='Настройки сохранены';await refresh();
       }catch(error){message.className='toast error';message.textContent=error.message;}
     });
     async function testTelegram(){

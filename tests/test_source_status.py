@@ -47,6 +47,37 @@ class SourceStatusTests(unittest.TestCase):
             demo_admin.pulse_failure("LinMath", "history", "История недоступна")
             self.assertEqual(len(demo_admin.EVENTS), 2)
 
+    def test_new_author_can_be_verified_while_source_recovers_from_old_author(self):
+        from unittest.mock import Mock
+        payload={"action":"snapshot", "profile_url":"https://www.tbank.ru/invest/social/profile/SpaceForcez/", "counts":{}}
+        browser=Mock()
+        with patch.object(demo_admin,"AUTH",{"status":"waiting"}), \
+                patch.object(demo_admin,"read_source",return_value={"profile":"SpaceForcez","instruments":[]}) as read:
+            demo_admin.verified_source_read(browser,payload)
+            read.assert_called_once_with(browser,payload)
+            browser.confirm_session.assert_called_once()
+            self.assertEqual(demo_admin.AUTH["status"],"authenticated")
+        with patch.object(demo_admin,"AUTH",{"status":"waiting"}), \
+                patch.object(demo_admin,"read_source",side_effect=demo_admin.PulseError("HTTP 401")):
+            browser.reset_mock()
+            with self.assertRaises(demo_admin.PulseError):demo_admin.verified_source_read(browser,payload)
+            self.assertEqual(demo_admin.AUTH["status"],"waiting")
+            browser.confirm_session.assert_not_called()
+
+    def test_author_reset_discards_displayed_data_but_preserves_journal(self):
+        old_event={"profile":"Old","trade":"ДЕМО: куплено"}
+        with patch.object(demo_admin,"AUTH",{"status":"required"}),patch.object(demo_admin,"MONITOR",{"status":"error","message":"old error"}), \
+                patch.object(demo_admin,"TODAY",[{"profile":"Old"}]),patch.object(demo_admin,"MONTH",{}), \
+                patch.object(demo_admin,"INVESTOR_PORTFOLIO",{"profile_url":"Old","rows":[{}]}), \
+                patch.object(demo_admin,"EVENTS",[old_event]),patch.object(demo_admin,"PULSE_RETRIES",{"New":{"attempts":10}}):
+            demo_admin.reset_author_view("New")
+            self.assertEqual(demo_admin.MONITOR["status"],"checking")
+            self.assertNotIn("old error",demo_admin.MONITOR["message"])
+            self.assertEqual(demo_admin.TODAY,[])
+            self.assertEqual(demo_admin.INVESTOR_PORTFOLIO["profile_url"],"New")
+            self.assertEqual(demo_admin.EVENTS,[old_event])
+            self.assertNotIn("New",demo_admin.PULSE_RETRIES)
+
     def test_partial_history_is_one_notice_instead_of_repeated_errors(self):
         with patch.object(demo_admin, "PULSE_FAILURES", {}), patch.object(demo_admin, "add_event") as record:
             demo_admin.pulse_history_pending("LinMath", 5)

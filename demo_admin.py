@@ -872,6 +872,12 @@ def advance_month_scan(browser: PulseBrowser, scan: dict, batch_size: int = 1) -
     return False
 
 
+def assert_selected_author(settings):
+    if os.environ.get("TINVEST_ROLE") == "client" and shared_source():
+        if canonical_profile_url(load_settings()["profile_url"]) != canonical_profile_url(settings["profile_url"]):
+            raise PulseError("Автор изменён; ждём данные выбранного профиля")
+
+
 def poll_once(browser: PulseBrowser, settings: dict, *, emit_events: bool = True) -> None:
     settings = {**DEFAULTS, **settings}
     with LOCK:
@@ -884,6 +890,7 @@ def poll_once(browser: PulseBrowser, settings: dict, *, emit_events: bool = True
     profile, _ = operations_url(settings["profile_url"])
     previous = state.get(profile, {})
     profile, instruments = browser.snapshot(settings["profile_url"], previous)
+    assert_selected_author(settings)
     pulse_recovered(settings["profile_url"], "instruments")
     pulse_recovered(settings["profile_url"], "authorization")
     # A verified snapshot is immediately useful; optional portfolio/history reads
@@ -925,6 +932,7 @@ def poll_once(browser: PulseBrowser, settings: dict, *, emit_events: bool = True
             pulse_retry("portfolio:" + settings["profile_url"], "portfolio", message)
             warnings.append("Портфель автора: " + message)
             portfolio = portfolio_unavailable(settings["profile_url"])
+    assert_selected_author(settings)
     compare_positions(portfolio, previous_portfolios.get(canonical_profile_url(settings["profile_url"])))
     with LOCK:
         INVESTOR_PORTFOLIO.clear()
@@ -1003,6 +1011,7 @@ def poll_once(browser: PulseBrowser, settings: dict, *, emit_events: bool = True
         warnings.append("Сделки: " + message)
         recent_message = ("Список получен; история за 24 часа загружена частично" if recent
                           else "Список получен; история за 24 часа временно недоступна")
+    assert_selected_author(settings)
     if session_warning:
         recent_message += "; браузерную сессию не удалось сохранить"
     if reset_keys:
@@ -1130,6 +1139,38 @@ def handle_poll_error(browser: PulseBrowser, error: Exception, profile_url: str)
     return should_close
 
 
+def verified_source_read(browser, payload):
+    """A failed author must not prevent verifying another author with saved cookies."""
+    if browser is None:
+        raise PulseError("Общий источник не подключён; вход выполняет владелец")
+    # Non-snapshot requests must establish access first when the source is recovering.
+    if AUTH["status"] != "authenticated" and payload["action"] != "snapshot":
+        read_source(browser, {"action": "snapshot", "profile_url": payload["profile_url"], "counts": {}})
+    result = read_source(browser, payload)
+    browser.confirm_session()
+    with LOCK:
+        AUTH.update(status="authenticated", message="Вход в Пульс подтверждён")
+    return result
+
+
+def reset_author_view(profile_url):
+    """Discard displayed data and retry state, preserving journal and trade watermarks."""
+    with LOCK:
+        AUTH.update(status="checking", message="Проверяем выбранного автора")
+        TODAY.clear()
+        INVESTOR_PORTFOLIO.clear()
+        INVESTOR_PORTFOLIO.update(portfolio_unavailable(profile_url, "Загружаем портфель выбранного автора"))
+        MONITOR.update(status="checking", phase="authorization", message="Проверяем выбранного автора",
+                       progress="Проверяем подключение и загружаем выбранного автора", warning="",
+                       profile="", instruments=[], instrument_count=0, last_check=None)
+        MONTH.update(status="idle", items=[], processed=0, total=0, message="", loaded_at=None)
+        for key in [profile_url, "portfolio:" + profile_url]:
+            PULSE_RETRIES.pop(key, None)
+        for key in list(PULSE_FAILURES):
+            if key[0] in {profile_url, "portfolio:" + profile_url}:
+                PULSE_FAILURES.pop(key, None)
+
+
 def confirm_source_login(browser, settings):
     """Validate source access without client history, policies or trading schedules."""
     profile, instruments = browser.snapshot(settings["profile_url"], {})
@@ -1208,15 +1249,14 @@ def monitor_loop() -> None:
         if request:
             try:
                 if request["action"] == "source_read":
-                    if not browser or AUTH["status"] != "authenticated":
+                    if not browser:
                         raise PulseError("Общий источник не подключён; вход выполняет владелец")
                     cache_key = json.dumps(request["payload"], sort_keys=True)
                     cached = source_cache.get(cache_key)
-                    if cached and cached[0] > time.monotonic():
+                    if cached and AUTH["status"] == "authenticated" and cached[0] > time.monotonic():
                         request["result"] = cached[1]
                     else:
-                        request["result"] = read_source(browser, request["payload"])
-                        browser.confirm_session()
+                        request["result"] = verified_source_read(browser, request["payload"])
                         source_cache = {key: value for key, value in source_cache.items()
                                         if value[0] > time.monotonic()}
                         if len(source_cache) < 256:
@@ -1417,12 +1457,7 @@ def remote_monitor_loop() -> None:
             next_poll = 0
             month_scan = None
             PULSE_RETRIES.pop(profile, None)
-            with LOCK:
-                AUTH.update(status="checking", message="Проверяем общий источник")
-                TODAY.clear()
-                MONITOR.update(status="checking", instruments=[], profile="", last_check=None,
-                               phase="authorization", progress="Проверяем авторизацию Пульса", warning="")
-                MONTH.update(status="idle", items=[], processed=0, total=0, message="", loaded_at=None)
+            reset_author_view(profile)
         try:
             request = HISTORY_REQUESTS.get(timeout=0.1 if month_scan else 0.5)
         except queue.Empty:
@@ -1459,6 +1494,9 @@ def remote_monitor_loop() -> None:
                 if not settings["monitoring_enabled"]:
                     MONITOR.update(status="stopped", message="Уведомления выключены; данные профиля обновлены")
             except Exception as error:
+                if profile != load_settings()["profile_url"]:
+                    next_poll = 0
+                    continue
                 message = str(error) if isinstance(error, PulseError) else "Ошибка чтения общего источника"
                 print("Пульс: обновление кабинета прервано на этапе " + MONITOR.get("phase", "подключение")
                       + " (" + type(error).__name__ + "): " + message.replace("\n", " ")[:240], flush=True)
@@ -1663,7 +1701,12 @@ class Handler(BaseHTTPRequestHandler):
                 self.respond(403, {"error": "Сначала авторизуйся в Пульсе"})
                 return
             if self.path == "/api/settings":
-                self.respond(200, {"settings": save_settings(data)})
+                previous_profile = load_settings()["profile_url"]
+                updated = save_settings(data)
+                if shared_source() and updated["profile_url"] != previous_profile:
+                    reset_author_view(updated["profile_url"])
+                    HISTORY_REQUESTS.put({"action": "source_refresh"})
+                self.respond(200, {"settings": updated})
             elif self.path == "/api/auto-copy":
                 enabled = data.get("enabled")
                 if type(enabled) is not bool:
@@ -1808,6 +1851,7 @@ class Handler(BaseHTTPRequestHandler):
                         MONITOR.update(status="checking", phase="authorization", warning="",
                                        progress="Проверяем авторизацию Пульса", message="Проверяем авторизацию Пульса")
                         INVESTOR_PORTFOLIO.pop("checked_at", None)
+                        PULSE_RETRIES.pop(load_settings()["profile_url"], None)
                         HISTORY_REQUESTS.put({"action": "source_refresh"})
                 self.respond(202, {"ok": True})
             elif self.path == "/api/auth/check":
