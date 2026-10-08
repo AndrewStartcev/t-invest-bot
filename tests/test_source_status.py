@@ -47,6 +47,22 @@ class SourceStatusTests(unittest.TestCase):
             demo_admin.pulse_failure("LinMath", "history", "История недоступна")
             self.assertEqual(len(demo_admin.EVENTS), 2)
 
+    def test_source_waits_before_reporting_an_incident(self):
+        with patch.object(demo_admin, "PULSE_RETRIES", {}), \
+                patch.object(demo_admin, "pulse_failure") as failure:
+            message = "Общий источник не подключён; вход выполняет владелец"
+            first = demo_admin.pulse_retry("LinMath", "instruments", message, now=0)
+            self.assertEqual(first["status"], "retrying")
+            self.assertEqual(first["phase"], "authorization")
+            self.assertNotIn("Ошибка", first["message"])
+            for when in (30, 60, 90):
+                self.assertEqual(demo_admin.pulse_retry("LinMath", "instruments", message, now=when)["status"], "retrying")
+            failure.assert_not_called()
+            self.assertEqual(demo_admin.pulse_retry("LinMath", "instruments", message, now=121)["status"], "error")
+            failure.assert_called_once()
+            demo_admin.PULSE_RETRIES.pop("LinMath")
+            self.assertEqual(demo_admin.pulse_retry("LinMath", "instruments", message, now=125)["status"], "retrying")
+
     def test_failed_read_is_visible_without_exposing_stale_trades(self):
         message = "Общий источник временно недоступен"
         monitor = {**demo_admin.MONITOR, "status": "error", "message": message,
@@ -105,12 +121,14 @@ class SourceStatusTests(unittest.TestCase):
                 patch.object(demo_admin, "MONITOR", {}), \
                 patch.object(demo_admin, "MONTH", {}), \
                 patch.object(demo_admin, "TODAY", []), \
-                patch.object(demo_admin.time, "monotonic", side_effect=[0, 0, 1]), \
+                patch.object(demo_admin.time, "monotonic", side_effect=[0, 0, 0, 1]), \
                 patch.object(demo_admin, "scheduled_poll", side_effect=demo_admin.PulseError("Ошибка чтения")) as poll, \
                 patch.object(demo_admin.HISTORY_REQUESTS, "get", side_effect=[None, None, RuntimeError("stop loop")]):
             with self.assertRaisesRegex(RuntimeError, "stop loop"):
                 demo_admin.remote_monitor_loop()
             self.assertEqual(poll.call_count, 1)
+            self.assertEqual(demo_admin.MONITOR["status"], "retrying")
+            self.assertEqual(demo_admin.AUTH["status"], "checking")
 
 
 if __name__ == "__main__":

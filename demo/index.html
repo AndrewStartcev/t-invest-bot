@@ -489,6 +489,7 @@
       const stages={authorization:'Проверяем авторизацию Пульса',instruments:'Загружаем автора',portfolio:'Проверяем портфель автора',history:'Загружаем сделки'};
       if(m.status==='error')return {label:'Ошибка Пульса · смотри журнал',detail:(stages[m.phase]||'Обновление Пульса')+': '+m.message, error:true};
       if(m.status==='scheduled')return {label:'Ожидание расписания · МСК',detail:m.message};
+      if(m.status==='retrying')return {label:m.progress||'Ждём данные Пульса; повторяем проверку',detail:m.message,loading:true};
       if(m.status==='checking'||['checking','opening','waiting'].includes(a.status))return {label:(m.phase==='history'&&m.progress?m.progress:stages[m.phase])||'Проверяем авторизацию Пульса',detail:m.progress||a.message,loading:true};
       if(a.status!=='authenticated')return {label:'Требуется вход в Пульс',detail:a.message,error:true};
       if(m.warning)return {label:'Данные загружены частично · смотри журнал',detail:m.warning,warning:true};

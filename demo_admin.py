@@ -65,6 +65,7 @@ TRADE_FLOW_LOCK = threading.Lock()
 BROKER_REFRESH_LOCK = threading.Lock()
 HISTORY_REQUESTS = queue.Queue()
 PULSE_FAILURES: dict[tuple[str, str], str] = {}
+PULSE_RETRIES: dict[str, dict] = {}
 MONITOR = {"status": "stopped", "message": "Мониторинг выключен", "last_check": None, "profile": "", "instrument_count": 0, "instruments": []}
 AUTH = {"status": "checking", "message": "Проверяем сохранённый вход в Пульс"}
 TODAY: list[dict] = []
@@ -355,6 +356,24 @@ def pulse_failure(profile: str, phase: str, message: str) -> None:
 def pulse_recovered(profile: str, phase: str) -> None:
     with LOCK:
         PULSE_FAILURES.pop((profile, phase), None)
+
+
+def pulse_retry(profile: str, phase: str, message: str, *, now: float | None = None) -> dict:
+    """A source warming up or a transient read failure is not yet a client incident."""
+    now = time.monotonic() if now is None else now
+    with LOCK:
+        retry = PULSE_RETRIES.setdefault(profile, {"since": now, "attempts": 0})
+        retry["attempts"] += 1
+        expired = now - retry["since"] >= 120 and retry["attempts"] >= 3
+    if expired:
+        pulse_failure(profile, phase, message)
+        return {"status": "error", "phase": phase, "message": message,
+                "progress": "Не удалось получить данные; повторная проверка продолжится автоматически"}
+    label = ("Ждём подключения Пульса; проверяем авторизацию повторно"
+             if "источник" in message.lower() or phase == "authorization"
+             else "Ждём данные; повторяем проверку: " + PULSE_PHASES.get(phase, "обновление Пульса").lower())
+    return {"status": "retrying", "phase": "authorization" if "источник" in message.lower() else phase,
+            "message": label, "progress": label + f" · попытка {retry['attempts']}"}
 
 
 def apply_demo(event: dict, signal: dict, settings: dict) -> None:
@@ -1365,6 +1384,7 @@ def remote_monitor_loop() -> None:
             browser = RemotePulse(profile)
             next_poll = 0
             month_scan = None
+            PULSE_RETRIES.pop(profile, None)
             with LOCK:
                 AUTH.update(status="checking", message="Проверяем общий источник")
                 TODAY.clear()
@@ -1402,6 +1422,8 @@ def remote_monitor_loop() -> None:
         if time.monotonic() >= next_poll:
             try:
                 schedule_was_open = scheduled_poll(browser, settings, schedule_was_open)
+                if schedule_was_open:
+                    PULSE_RETRIES.pop(profile, None)
                 if not settings["monitoring_enabled"]:
                     MONITOR.update(status="stopped", message="Уведомления выключены; данные профиля обновлены")
             except Exception as error:
@@ -1409,11 +1431,11 @@ def remote_monitor_loop() -> None:
                 print("Пульс: обновление кабинета прервано на этапе " + MONITOR.get("phase", "подключение")
                       + " (" + type(error).__name__ + "): " + message.replace("\n", " ")[:240], flush=True)
                 failed_phase = MONITOR.get("phase", "authorization")
-                pulse_failure(profile, failed_phase, message)
+                retry = pulse_retry(profile, failed_phase, message)
                 with LOCK:
-                    AUTH.update(status="required", message=message)
-                    MONITOR.update(status="error", message=message, phase=failed_phase,
-                                   progress="Ожидаем данные общего источника; проверка повторится автоматически")
+                    AUTH.update(status="required" if retry["status"] == "error" else "checking",
+                                message=retry["message"])
+                    MONITOR.update(**retry)
             next_poll = time.monotonic() + settings["poll_seconds"]
             if not schedule_open(settings):
                 next_poll = time.monotonic() + 0.5
