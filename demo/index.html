@@ -40,6 +40,9 @@
     .dot { width:8px; height:8px; border-radius:50%; background:#e2aa40; }
     .dot.good { background:#38a976; }
     .dot.bad { background:#d76a63; }
+    .dot.loading { width:14px; height:14px; flex:none; background:transparent; border:2px solid #dce5f0; border-top-color:#e2aa40; animation:pulse-loading .8s linear infinite; }
+    @keyframes pulse-loading { to { transform:rotate(360deg); } }
+    @media (prefers-reduced-motion:reduce) { .dot.loading { animation-duration:2s; } }
     .cards { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:14px; margin-bottom:20px; }
     .card,.panel { background:#fff; border:1px solid #e1e8f0; border-radius:11px; min-width:0; }
     .card { min-height:110px; padding:18px 19px; }
@@ -216,7 +219,7 @@
         <div class="topbar"><span class="breadcrumb">Пульс / <b id="breadcrumb">Обзор</b></span><div class="top-right"><a class="button neutral small" id="server-browser-top" target="_blank" rel="noopener noreferrer" hidden>Браузер Пульса</a><button class="button neutral small" type="button" id="connect-pulse" hidden>Подключить Пульс</button><span id="trade-top-status">Брокерские заявки отключены</span><span class="badge" id="mode-badge">Мониторинг выключен</span></div></div>
       <div class="content">
         <section class="view active" id="view-overview">
-          <div class="page-head"><div><h1>Обзор</h1><p class="subtle" id="profile-heading">Профиль Пульса</p></div><div class="overview-tools"><button class="button small" type="button" id="blogger-portfolio-open">Портфель блогера</button><div class="live-status"><i class="dot" id="source-dot"></i><span id="source-status">Подключение</span></div></div></div>
+          <div class="page-head"><div><h1>Обзор</h1><p class="subtle" id="profile-heading">Профиль Пульса</p></div><div class="overview-tools"><div class="live-status" role="status"><i class="dot loading" id="source-dot" aria-hidden="true"></i><span id="source-status">Подключение</span></div></div></div>
           <div class="cards">
             <div class="card"><span class="card-label">Покупки автора · 24 ч</span><strong id="source-buys">0</strong><small>Опубликованные сделки</small></div>
             <div class="card"><span class="card-label">Продажи автора · 24 ч</span><strong id="source-sells">0</strong><small>Опубликованные сделки</small></div>
@@ -552,7 +555,7 @@
       el('copy-note').textContent=realMode==='auto'?'Новые сделки проверяются по лимитам и отправляются брокеру лимитными заявками. Для прошлых покупок подготовь заявку кнопкой в строке.':realMode==='confirm'?'Новые сделки ожидают подтверждения в журнале. Для прошлых покупок подготовь заявку кнопкой в строке.':autoCopyEnabled?'Новые покупки и продажи повторяются условно по лимитам. Кнопки в строках позволяют обработать ранее опубликованные покупки за 24 часа. Реальных заявок нет.':'Кнопки в строках условно повторяют покупки за 24 часа. Автокопирование новых сделок выключено. Реальных заявок нет.';
       const sourceLoading=sharedSource&&state.monitor.status!=='scheduled'&&(state.auth.status!=='authenticated'||['error','checking'].includes(state.monitor.status));
       el('source-status').textContent=sourceLoading?'Загружаем данные профиля из Пульса':state.monitor.status==='scheduled'?'Ожидание расписания · МСК':state.monitor.status==='error'?'Ошибка чтения Пульса':state.monitor.status==='checking'?'Проверяем данные Пульса':state.auth.status!=='authenticated'?'Пульс не подключён':state.settings.monitoring_enabled?'Мониторинг включён':'Мониторинг выключен';
-      el('source-dot').className='dot'+(sourceLoading?'':state.auth.status!=='authenticated'||state.monitor.status==='error'?' bad':state.monitor.status==='running'?' good':'');
+      el('source-dot').className='dot'+(sourceLoading?' loading':state.auth.status!=='authenticated'||state.monitor.status==='error'?' bad':state.monitor.status==='running'?' good':'');
       el('last-check').textContent=state.monitor.last_check?fmtDate(state.monitor.last_check):'—';
       el('source-message').textContent=sourceLoading?'Загружаем данные профиля из Пульса':state.auth.status==='authenticated'||['error','checking','scheduled'].includes(state.monitor.status)?state.monitor.message:state.auth.message;el('instrument-total').textContent=instruments.length;
       const buys=today.filter(item=>item.action==='buy').length,sells=today.filter(item=>item.action==='sell').length;
@@ -599,7 +602,6 @@
       catch(error){message.className='toast error space-top';message.textContent=error.message;}
       finally{button.disabled=false;}
     }
-    el('blogger-portfolio-open').addEventListener('click',()=>el('blogger-portfolio-dialog').showModal());
     el('blogger-portfolio-close').addEventListener('click',()=>el('blogger-portfolio-dialog').close());
     el('blogger-portfolio-dialog').addEventListener('click',event=>{if(event.target!==event.currentTarget)return;const rect=event.currentTarget.getBoundingClientRect();if(event.clientX<rect.left||event.clientX>rect.right||event.clientY<rect.top||event.clientY>rect.bottom)event.currentTarget.close();});
     el('broker-connect').addEventListener('click',()=>brokerAction('/api/broker/connect',{token:el('broker-token').value},el('broker-connect')));

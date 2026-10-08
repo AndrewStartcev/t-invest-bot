@@ -93,6 +93,37 @@ class PulseSessionTests(unittest.TestCase):
                 maintenance.assert_called_once_with(settings["profile_url"])
                 scan.assert_not_called()
 
+    def test_source_login_does_not_read_history_or_follow_client_schedule(self):
+        with tempfile.TemporaryDirectory() as root:
+            (Path(root) / "pulse-browser").mkdir()
+            settings = {**demo_admin.DEFAULTS, "monitoring_enabled": False}
+            with patch.object(demo_admin, "DATA_DIR", Path(root)), \
+                    patch.object(demo_admin, "load_settings", side_effect=[settings, KeyboardInterrupt]), \
+                    patch.object(demo_admin, "scheduled_pause", return_value=True), \
+                    patch.object(demo_admin, "AUTH", {"status": "waiting"}), \
+                    patch.object(demo_admin, "MONITOR", {}), patch.object(demo_admin, "MONTH", {}), \
+                    patch.object(demo_admin, "TODAY", []), \
+                    patch.dict(os.environ, {"TINVEST_WORKER_ROLE": "source"}), \
+                    patch.object(demo_admin.HISTORY_REQUESTS, "get", side_effect=queue.Empty), \
+                    patch.object(PulseBrowser, "open", lambda b, _: setattr(b, "list_url", "found")), \
+                    patch.object(PulseBrowser, "snapshot", return_value=("LinMath", [])) as snapshot, \
+                    patch.object(PulseBrowser, "confirm_session"), \
+                    patch.object(PulseBrowser, "history") as history, \
+                    patch.object(demo_admin, "scheduled_poll") as scan:
+                with self.assertRaises(KeyboardInterrupt):
+                    demo_admin.monitor_loop()
+                self.assertEqual(demo_admin.AUTH["status"], "authenticated")
+                snapshot.assert_called_once_with(settings["profile_url"], {})
+                history.assert_not_called()
+                scan.assert_not_called()
+
+    def test_fetch_timeout_remains_a_retryable_pulse_error(self):
+        with tempfile.TemporaryDirectory() as root:
+            browser, _ = self.browser(root)
+            browser.page.evaluate.return_value = {"ok": False, "status": 0, "timedOut": True}
+            with self.assertRaisesRegex(PulseError, "10 секунд"):
+                browser._fetch("https://www.tbank-online.com/mybank/api/social-api-gateway/test")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -372,12 +372,23 @@ class PulseBrowser:
         if self.page.is_closed() and not self.recover_page():
             raise PulseError("Окно Пульса закрыто")
         headers = {key: value for key, value in self.request_headers.items() if key.lower() != "referer"}
-        return self.page.evaluate("""async ({url, headers}) => {
-            const response = await fetch(url, {credentials: 'include', headers});
-            let data = null;
-            try { data = await response.json(); } catch (_) {}
-            return {ok: response.ok, status: response.status, data};
+        result = self.page.evaluate("""async ({url, headers}) => {
+            const controller = new AbortController();
+            const timer = setTimeout(() => controller.abort(), 10000);
+            try {
+                const response = await fetch(url, {credentials: 'include', headers, signal: controller.signal});
+                let data = null;
+                try { data = await response.json(); }
+                catch (error) { if (controller.signal.aborted) throw error; }
+                return {ok: response.ok, status: response.status, data};
+            } catch (error) {
+                return {ok: false, status: 0, data: null, timedOut: controller.signal.aborted};
+            } finally { clearTimeout(timer); }
         }""", {"url": url, "headers": headers})
+        if result.get("status") == 0:
+            raise PulseError("Пульс не ответил за 10 секунд; повторим запрос" if result.get("timedOut")
+                             else "Соединение с Пульсом прервалось; повторим запрос")
+        return result
 
     def resolve_target(self) -> bool:
         if self.target_profile_id is None:
@@ -403,6 +414,7 @@ class PulseBrowser:
         self.page.goto(url, wait_until="commit", timeout=45000)
 
     def snapshot(self, profile_url: str, counts: dict[str, int]) -> tuple[str, list[dict]]:
+        read_deadline = time.monotonic() + 40
         name, url = operations_url(profile_url)
         if self.page is None:
             self.open(profile_url)
@@ -432,6 +444,8 @@ class PulseBrowser:
         cursor = None
         list_url = self.list_url
         for _ in range(100):
+            if time.monotonic() >= read_deadline:
+                raise PulseError("Превышено время чтения списка Пульса; повторим запрос")
             response = self._fetch(with_cursor(list_url, cursor) if cursor is not None else list_url)
             page = payload(response)
             items.extend(page["items"])
@@ -463,6 +477,8 @@ class PulseBrowser:
                 next_cursor = None
                 visited = set()
                 while len(history) < needed:
+                    if time.monotonic() >= read_deadline:
+                        raise PulseError("Превышено время чтения истории Пульса; повторим запрос")
                     page = payload(self._fetch(with_cursor(history_url, next_cursor, parameter="cursor")
                                                if next_cursor is not None else history_url))
                     history.extend(page["items"])

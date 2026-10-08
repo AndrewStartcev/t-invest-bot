@@ -986,6 +986,17 @@ def handle_poll_error(browser: PulseBrowser, error: Exception, profile_url: str)
     return should_close
 
 
+def confirm_source_login(browser, settings):
+    """Validate source access without client history, policies or trading schedules."""
+    profile, instruments = browser.snapshot(settings["profile_url"], {})
+    browser.confirm_session()
+    with LOCK:
+        AUTH.update(status="authenticated", message="Вход в Пульс подтверждён")
+        MONITOR.update(status="running", message="Источник подключён; данные читаются по запросам кабинетов",
+                       profile=profile, instrument_count=len(instruments), instruments=[],
+                       last_check=datetime.now(timezone.utc).isoformat())
+
+
 def scheduled_poll(browser, settings, was_open):
     if not schedule_open(settings):
         with LOCK:
@@ -1208,9 +1219,12 @@ def monitor_loop() -> None:
         if (browser and time.monotonic() >= next_poll
                 and not (os.environ.get("TINVEST_WORKER_ROLE") == "source" and AUTH["status"] == "authenticated")):
             try:
-                schedule_was_open = scheduled_poll(browser, settings, schedule_was_open)
+                if os.environ.get("TINVEST_WORKER_ROLE") == "source":
+                    confirm_source_login(browser, settings)
+                else:
+                    schedule_was_open = scheduled_poll(browser, settings, schedule_was_open)
                 reconnect_delay = 3.0
-                if not settings["monitoring_enabled"]:
+                if not settings["monitoring_enabled"] and os.environ.get("TINVEST_WORKER_ROLE") != "source":
                     with LOCK:
                         MONITOR.update(status="stopped", message="Живые уведомления выключены; анализ профиля обновлён")
             except Exception as error:
