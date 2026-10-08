@@ -1,0 +1,17 @@
+const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict'),path=require('node:path');
+const html=fs.readFileSync(path.join(__dirname,'../demo/index.html'),'utf8');
+const code=html.slice(html.indexOf('    function journalGroups('),html.indexOf('    function renderDiagnostics('));
+const ctx={URL};vm.createContext(ctx);vm.runInContext(code,ctx);
+const items=[{source:'pulse_error',profile:'author',reason:'Failed'},{source:'pulse_status',reason:'Partial'},{source:'telegram_test',notification:'отправлено'},{source:'historic_demo',instrument:'TEST',notification:'отправлено'},{source:'pulse',instrument:'OTHER',notification:'—'}];
+const groups=ctx.journalGroups(items);
+const repeated=ctx.groupPulseEvents([{source:'pulse_status',profile:'A',phase:'history',time:'later'},{source:'pulse_error',profile:'A',phase:'history',reason:'История за 24 часа загружена частично',time:'earlier'}]);
+assert.equal(repeated.length,1);assert.equal(repeated[0].repeats,2);assert.equal(repeated[0].firstTime,'earlier');
+assert.equal(groups.pulse.length,2);assert.equal(groups.trades.length,2);assert.equal(groups.telegram.length,2);
+assert.ok(groups.trades.every(item=>item.instrument));assert.equal(ctx.journalAuthor('https://www.tbank.ru/invest/social/profile/LinMath/'),'LinMath');
+const tabs=['trades','decisions','pulse','telegram'].map(key=>({dataset:{journalTab:key},handlers:{},attrs:{},addEventListener(k,v){this.handlers[k]=v;},setAttribute(k,v){this.attrs[k]=v;},focus(){this.focused=true;}}));
+const panels=tabs.map(tab=>({id:'journal-'+tab.dataset.journalTab}));let opened;
+ctx.document={querySelectorAll:selector=>selector==='[data-journal-tab]'?tabs:panels};ctx.el=()=>({addEventListener:(k,fn)=>{opened=fn;}});ctx.showView=name=>{ctx.currentView=name;};
+vm.runInContext(html.slice(html.indexOf('    function showJournalTab('),html.indexOf('    async function api(')),ctx);
+opened();assert.equal(ctx.currentView,'journal');assert.equal(panels[2].hidden,false);assert.equal(panels[0].hidden,true);
+tabs[3].handlers.keydown({key:'ArrowRight',preventDefault(){}});assert.equal(tabs[0].attrs['aria-selected'],'true');
+console.log('Journal categorization, direct status link and tab navigation passed');

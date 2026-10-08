@@ -353,6 +353,20 @@ def pulse_failure(profile: str, phase: str, message: str) -> None:
     print("Пульс: " + phase + ": " + message.replace("\n", " ")[:240], flush=True)
 
 
+def pulse_history_pending(profile: str, count: int) -> None:
+    with LOCK:
+        key = (profile, "history_partial")
+        if key in PULSE_FAILURES:
+            return
+        add_event({"time": datetime.now(timezone.utc).isoformat(), "source": "pulse_status",
+                   "profile": profile, "instrument": "Пульс", "price": "—", "phase": "history",
+                   "trade": "История загружена частично", "severity": "info",
+                   "reason": f"Получено сделок: {count}. Чтение истории за 24 часа достигло лимита времени. "
+                             "Пульс подключён; полученные сделки отображаются. Проверка повторится автоматически.",
+                   "notification": "—"})
+        PULSE_FAILURES[key] = "pending"
+
+
 def pulse_recovered(profile: str, phase: str) -> None:
     with LOCK:
         PULSE_FAILURES.pop((profile, phase), None)
@@ -783,6 +797,7 @@ def recent_profile_trades(browser: PulseBrowser, profile: str, instruments: list
         for _ in range(max_pages):
             if time.monotonic() >= deadline:
                 error = PulseError("История за 24 часа загружена частично; повторим проверку")
+                error.history_pending = True
                 error.partial_trades = sorted(found, key=lambda trade: trade["tradeDateTime"], reverse=True)
                 raise error
             page = browser.history(item["ticker"], item["classCode"], cursor)
@@ -976,11 +991,16 @@ def poll_once(browser: PulseBrowser, settings: dict, *, emit_events: bool = True
         recent = recent_profile_trades(browser, profile, instruments)
         recent_message = "Данные Пульса получены"
         pulse_recovered(settings["profile_url"], "history")
+        pulse_recovered(settings["profile_url"], "history_partial")
     except Exception as error:
         message = str(error) if isinstance(error, PulseError) else "Не удалось загрузить историю сделок"
-        pulse_failure(settings["profile_url"], "history", message)
-        warnings.append("Сделки: " + message)
         recent = getattr(error, "partial_trades", [])
+        if getattr(error, "history_pending", False):
+            pulse_history_pending(settings["profile_url"], len(recent))
+            message = f"История за 24 часа загружена частично: получено {len(recent)} сделок; проверка повторится автоматически"
+        else:
+            pulse_failure(settings["profile_url"], "history", message)
+        warnings.append("Сделки: " + message)
         recent_message = ("Список получен; история за 24 часа загружена частично" if recent
                           else "Список получен; история за 24 часа временно недоступна")
     if session_warning:

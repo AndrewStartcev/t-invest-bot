@@ -237,6 +237,18 @@
     .policy-fields summary { cursor:pointer; font-size:13px; font-weight:700; }
     @media(max-width:1000px) { .holdings-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } }
     @media(max-width:700px) { .author-hero { display:grid; padding:20px; gap:18px; } .hero-meta { text-align:left; justify-items:start; } .holdings-grid { grid-template-columns:1fr; } }
+
+    .status-link { padding:0; border:0; background:transparent; color:inherit; font:inherit; text-align:left; }
+    .status-link:hover { text-decoration:underline; text-underline-offset:3px; }
+    .status-link:focus-visible { outline:2px solid #c3a00c; outline-offset:4px; }
+    .journal-count { display:inline-block; min-width:20px; margin-left:5px; padding:2px 6px; border-radius:6px; background:#e8edf4; font-size:11px; }
+    .journal-current { display:grid; gap:10px; padding:18px; border-radius:12px; background:#f5f8fc; border:1px solid #e2e9f2; }
+    .diagnostic-feed { display:grid; gap:12px; }
+    .diagnostic-card { padding:18px 20px; border:1px solid #edd5d2; border-left:3px solid #d7887d; border-radius:10px; background:#fff; }
+    .diagnostic-card.pending { border-color:#e8dfba; border-left-color:#d8b633; }
+    .diagnostic-meta { display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; color:#8593a7; font-size:11px; }
+    .diagnostic-card h3 { font-size:14px; margin:12px 0 7px; }
+    .diagnostic-card p { color:#637690; font-size:13px; line-height:1.6; overflow-wrap:anywhere; }
   </style>
 </head>
 <body>
@@ -276,7 +288,7 @@
       <div class="side-foot" id="panel-location"><b>Локальная панель</b>Данные сеанса остаются на этом компьютере</div>
     </aside>
     <main class="main">
-        <div class="topbar"><span class="breadcrumb">Пульс / <b id="breadcrumb">Обзор</b></span><div class="top-right"><div class="live-status" role="status" aria-live="polite"><i class="dot loading" id="source-dot" aria-hidden="true"></i><span id="source-status">Проверяем авторизацию Пульса</span></div><a class="button neutral small" id="server-browser-top" target="_blank" rel="noopener noreferrer" hidden>Браузер Пульса</a><button class="button neutral small" type="button" id="connect-pulse" hidden>Подключить Пульс</button><span id="trade-top-status">Брокерские заявки отключены</span><span class="badge" id="mode-badge">Мониторинг выключен</span></div></div>
+        <div class="topbar"><span class="breadcrumb">Пульс / <b id="breadcrumb">Обзор</b></span><div class="top-right"><div class="live-status" role="status" aria-live="polite"><i class="dot loading" id="source-dot" aria-hidden="true"></i><button type="button" class="status-link" id="source-status">Проверяем авторизацию Пульса</button></div><a class="button neutral small" id="server-browser-top" target="_blank" rel="noopener noreferrer" hidden>Браузер Пульса</a><button class="button neutral small" type="button" id="connect-pulse" hidden>Подключить Пульс</button><span id="trade-top-status">Брокерские заявки отключены</span><span class="badge" id="mode-badge">Мониторинг выключен</span></div></div>
       <div class="content">
         <section class="view active" id="view-overview">
           <div class="page-head"><div><h1>Обзор</h1><p class="subtle">Автор, найденные сделки и результаты обработки</p></div><button class="button neutral" type="button" id="overview-settings">Настройки</button></div>
@@ -328,12 +340,9 @@
           <div class="settings-tab-panel" id="settings-account" role="tabpanel" aria-labelledby="settings-tab-account" hidden><section class="panel" id="account-panel" hidden><div class="panel-head"><h2>Мой кабинет</h2><span class="tag" id="account-login"></span></div><div class="panel-body"><p class="subtle">Токены, счета, лимиты и журнал этого кабинета отделены от других клиентов.</p><form id="password-form"><div class="field space-top"><label for="current-password">Текущий пароль панели</label><input id="current-password" type="password" autocomplete="current-password" required></div><div class="field"><label for="new-password">Новый пароль</label><input id="new-password" type="password" autocomplete="new-password" minlength="12" maxlength="72" required><small>Минимум 12 символов; максимум 72 байта UTF-8</small></div><div class="field"><label for="confirm-password">Повтори новый пароль</label><input id="confirm-password" type="password" autocomplete="new-password" required></div><button class="button neutral" id="change-password" type="submit">Изменить пароль</button><p class="toast space-top" id="password-message" role="status"></p></form>
           </div></section>
           </div></section>
-        <section class="view" id="view-journal">
-          <section class="panel space-top"><div class="panel-head"><h2>Решения оператора</h2><span class="tag">Telegram и панель</span></div><div class="panel-body" id="operator-approvals"></div></section>
+<section class="view" id="view-journal"><div class="page-head"><div><h1>Журнал</h1><p class="subtle">Сделки, решения и состояние подключений</p></div><span class="tag" id="event-count">0 событий</span></div><div class="settings-tabs journal-tabs" role="tablist" aria-label="Разделы журнала"><button type="button" role="tab" id="journal-tab-trades" data-journal-tab="trades" aria-controls="journal-trades" aria-selected="true" tabindex="0">Сделки и заявки <span id="journal-count-trades" class="journal-count">0</span></button><button type="button" role="tab" id="journal-tab-decisions" data-journal-tab="decisions" aria-controls="journal-decisions" aria-selected="false" tabindex="-1">Решения оператора <span id="journal-count-decisions" class="journal-count">0</span></button><button type="button" role="tab" id="journal-tab-pulse" data-journal-tab="pulse" aria-controls="journal-pulse" aria-selected="false" tabindex="-1">Работа Пульса <span id="journal-count-pulse" class="journal-count">0</span></button><button type="button" role="tab" id="journal-tab-telegram" data-journal-tab="telegram" aria-controls="journal-telegram" aria-selected="false" tabindex="-1">Telegram <span id="journal-count-telegram" class="journal-count">0</span></button></div><div class="journal-tab-panel" id="journal-trades" role="tabpanel" aria-labelledby="journal-tab-trades"><section class="panel"><div class="panel-head"><div class="panel-title"><h2>Сделки и заявки</h2><p class="subtle">Найденные сигналы и результаты их обработки ботом</p></div></div><div id="events" class="empty">Сделок пока нет</div></section></div><div class="journal-tab-panel" id="journal-decisions" role="tabpanel" aria-labelledby="journal-tab-decisions" hidden>          <section class="panel space-top"><div class="panel-head"><h2>Решения оператора</h2><span class="tag">Telegram и панель</span></div><div class="panel-body" id="operator-approvals"></div></section>
           <section class="panel space-top"><div class="panel-head"><h2>Активы без повторного подтверждения</h2></div><div class="panel-body"><p class="subtle">Чтобы пометить актив, при подтверждении заявки выбери «Подтвердить и больше не спрашивать». Здесь можно снять пометку. Разрешение относится к выбранному профилю автора и счёту. Следующие сделки актива могут исполняться автоматически даже в режиме подтверждения каждой заявки. Денежные и процентные лимиты сохраняются.</p><div id="asset-consents" class="space-top"></div></div></section>
-          <div class="page-head"><div><h1>Журнал</h1><p class="subtle">Сигналы, уведомления и статусы заявок</p></div><span class="tag" id="event-count">0 событий</span></div>
-          <section class="panel"><div id="events" class="empty">Событий пока нет</div></section>
-        </section>
+</div><div class="journal-tab-panel" id="journal-pulse" role="tabpanel" aria-labelledby="journal-tab-pulse" hidden><section class="panel"><div class="panel-head"><div class="panel-title"><h2>Работа Пульса</h2><p class="subtle">Подключение, загрузка автора, портфеля и истории сделок</p></div></div><div class="panel-body"><div class="journal-current"><span class="hero-eyebrow">Текущее состояние</span><b id="journal-pulse-status">Проверяем подключение</b><p id="journal-pulse-detail" class="subtle"></p></div><div id="pulse-events" class="diagnostic-feed space-top"></div></div></section></div><div class="journal-tab-panel" id="journal-telegram" role="tabpanel" aria-labelledby="journal-tab-telegram" hidden><section class="panel"><div class="panel-head"><div class="panel-title"><h2>Доставка в Telegram</h2><p class="subtle">Тестовые сообщения и доставка уведомлений по сделкам</p></div></div><div id="telegram-events" class="empty"></div></section></div></section>
       </div>
     </main>
   </div>
@@ -373,6 +382,19 @@
       const panel=invalid.closest('.settings-tab-panel');if(panel)showSettingsTab(panel.id.replace('settings-',''),true);
       invalid.reportValidity();return false;
     }
+    function showJournalTab(name,focus=false){
+      document.querySelectorAll('[data-journal-tab]').forEach(button=>{const active=button.dataset.journalTab===name;button.setAttribute('aria-selected',String(active));button.tabIndex=active?0:-1;if(active&&focus)button.focus();});
+      document.querySelectorAll('.journal-tab-panel').forEach(panel=>panel.hidden=panel.id!=='journal-'+name);
+    }
+    document.querySelectorAll('[data-journal-tab]').forEach(button=>{
+      button.addEventListener('click',()=>showJournalTab(button.dataset.journalTab));
+      button.addEventListener('keydown',event=>{const buttons=[...document.querySelectorAll('[data-journal-tab]')],index=buttons.indexOf(button);let next;
+        if(event.key==='ArrowRight')next=(index+1)%buttons.length;if(event.key==='ArrowLeft')next=(index+buttons.length-1)%buttons.length;
+        if(event.key==='Home')next=0;if(event.key==='End')next=buttons.length-1;
+        if(next!==undefined){event.preventDefault();showJournalTab(buttons[next].dataset.journalTab,true);}
+      });
+    });
+    el('source-status').addEventListener('click',()=>{showView('journal');showJournalTab('pulse');});
     async function api(path, payload) {
       const response = await fetch(path, payload === undefined ? {} : {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
       const data = await response.json();
@@ -583,14 +605,54 @@
       if(m.status==='retrying')return {label:m.progress||'Ждём данные Пульса; повторяем проверку',detail:m.message,loading:true};
       if(m.status==='checking'||['checking','opening','waiting'].includes(a.status))return {label:(m.phase==='history'&&m.progress?m.progress:stages[m.phase])||'Проверяем авторизацию Пульса',detail:m.progress||a.message,loading:true};
       if(a.status!=='authenticated')return {label:'Требуется вход в Пульс',detail:a.message,error:true};
-      if(m.warning)return {label:'Данные загружены частично · смотри журнал',detail:m.warning,warning:true};
+      if(m.warning){const history=m.warning.includes('Сделки:'),portfolio=m.warning.includes('Портфель автора:');return {label:history&&portfolio?'Ждём часть истории и портфель автора':history?'История сделок загружена частично':portfolio?'Ждём портфель автора':'Обновляем часть данных Пульса',detail:m.warning,warning:true};}
       return {label:state.settings.monitoring_enabled?'Мониторинг включён':'Данные Пульса загружены',detail:m.message||a.message};
     }
+    function journalGroups(items){
+      const pulse=items.filter(item=>['pulse_error','pulse_status'].includes(item.source));
+      const trades=items.filter(item=>!['pulse_error','pulse_status','telegram_test'].includes(item.source));
+      const telegram=items.filter(item=>item.source==='telegram_test'||(item.notification&&item.notification!=='—'&&!['pulse_error','pulse_status'].includes(item.source)));
+      return {pulse,trades,telegram};
+    }
+    function journalAuthor(value){try{return decodeURIComponent(new URL(value).pathname.split('/').filter(Boolean).at(-1));}catch{return value||'Автор не указан';}}
+    function groupPulseEvents(items){
+      const groups=[];
+      for(const item of items){
+        const partial=item.source==='pulse_status'||/История за 24 часа загружена частично/.test(item.reason||'');
+        const key=JSON.stringify([item.profile,item.phase,partial?'history_partial':item.reason]);
+        const previous=groups.at(-1);
+        if(previous?.groupKey===key){previous.repeats++;previous.firstTime=item.time;}
+        else groups.push({...item,groupKey:key,repeats:1,firstTime:item.time});
+      }
+      return groups;
+    }
+    function renderDiagnostics(items){
+      const box=el('pulse-events');box.replaceChildren();
+      if(!items.length){box.textContent='Записей о работе Пульса пока нет';return;}
+      const phases={authorization:'Авторизация',instruments:'Автор и инструменты',portfolio:'Портфель автора',history:'История сделок'};
+      for(const item of groupPulseEvents(items)){
+        const partial=item.source==='pulse_status'||/История за 24 часа загружена частично/.test(item.reason||'');
+        const card=document.createElement('article');card.className='diagnostic-card'+(partial?' pending':'');
+        const meta=document.createElement('div');meta.className='diagnostic-meta';const time=document.createElement('span'),phase=document.createElement('span');time.textContent=fmtDate(item.time)+(item.repeats>1?' · повторялось '+item.repeats+' раз':'');phase.textContent=(phases[item.phase]||'Обновление данных')+' · '+journalAuthor(item.profile);meta.append(time,phase);
+        const title=document.createElement('h3');title.textContent=partial?'История загружена частично':item.trade||'Не удалось обновить данные';
+        const reason=document.createElement('p');reason.textContent=item.reason||'Причина не указана';
+        if(partial&&item.source==='pulse_error')reason.textContent='История за 24 часа не успела полностью загрузиться за отведённое время. Эта запись относится к загрузке истории, а не к потере авторизации.';
+        card.append(meta,title,reason);box.append(card);
+      }
+    }
+    function renderTelegramEvents(items){
+      const box=el('telegram-events');box.replaceChildren();
+      if(!items.length){box.className='empty';box.textContent='Тестовых сообщений и уведомлений пока нет';return;}
+      box.className='table-wrap';const table=document.createElement('table');const head=document.createElement('thead');head.innerHTML='<tr><th>Время</th><th>Сообщение</th><th>Получатель</th><th>Результат доставки</th></tr>';table.append(head);const body=document.createElement('tbody');
+      for(const item of items){const row=document.createElement('tr');for(const value of [fmtDate(item.time),item.source==='telegram_test'?'Тестовое сообщение':(item.instrument||'Сделка')+' · '+(item.trade||''),item.recipient_id||'Не указан',item.notification||'Нет результата']){const cell=document.createElement('td');cell.textContent=value;row.append(cell);}body.append(row);}table.append(body);box.append(table);
+    }
     function renderEvents(){
-      const box=el('events');box.replaceChildren();el('event-count').textContent=events.length+' событий';
-      if(!events.length){box.className='empty';box.textContent='Событий пока нет';return;}box.className='table-wrap';
+      const groups=journalGroups(events),tradeEvents=groups.trades;renderDiagnostics(groups.pulse);renderTelegramEvents(groups.telegram);
+      for(const key of ['trades','pulse','telegram'])el('journal-count-'+key).textContent=groups[key].length;
+      const box=el('events');box.replaceChildren();el('event-count').textContent=events.length+' записей в журнале';
+      if(!tradeEvents.length){box.className='empty';box.textContent='Событий пока нет';return;}box.className='table-wrap';
       const table=document.createElement('table'),head=document.createElement('thead');head.innerHTML='<tr><th>Обнаружено</th><th>Сигнал</th><th>Профиль</th><th>Результат</th><th>Объём</th><th>Причина</th><th>Telegram</th><th>Действие</th></tr>';table.append(head);table.style.minWidth='1100px';const body=document.createElement('tbody');
-      for(const item of events){const row=document.createElement('tr');const volume=item.quantity?item.quantity+' лот/контр. · '+(item.amount_rub||'—')+' ₽':'—';const values=[fmtDate(item.time),item.instrument+' · '+item.price,item.profile,item.trade,volume,item.reason||'—',item.notification||'—'];for(const value of values){const cell=document.createElement('td');cell.textContent=value;row.append(cell);}const action=document.createElement('td');if(item.real_status==='awaiting_approval'&&!item.approval_id&&realMode!=='off'){const button=document.createElement('button');button.type='button';button.className='button ghost small';button.textContent='Подготовить заявку';button.addEventListener('click',()=>prepareReal(item.source_key));action.append(button);}row.append(action);body.append(row);}table.append(body);box.append(table);
+      for(const item of tradeEvents){const row=document.createElement('tr');const volume=item.quantity?item.quantity+' лот/контр. · '+(item.amount_rub||'—')+' ₽':'—';const values=[fmtDate(item.time),item.instrument+' · '+item.price,item.profile,item.trade,volume,item.reason||'—',item.notification||'—'];for(const value of values){const cell=document.createElement('td');cell.textContent=value;row.append(cell);}const action=document.createElement('td');if(item.real_status==='awaiting_approval'&&!item.approval_id&&realMode!=='off'){const button=document.createElement('button');button.type='button';button.className='button ghost small';button.textContent='Подготовить заявку';button.addEventListener('click',()=>prepareReal(item.source_key));action.append(button);}row.append(action);body.append(row);}table.append(body);box.append(table);
     }
     function ruleValues(){
       const rules={};
@@ -663,6 +725,8 @@
       el('last-check').textContent=state.monitor.last_check?fmtDate(state.monitor.last_check):'—';
       el('source-message').textContent=pulse.detail;el('instrument-total').textContent=state.auth.status==='authenticated'?instruments.length:'—';
       el('overview-progress').textContent=pulse.label;
+      el('journal-pulse-status').textContent=pulse.label;el('journal-pulse-detail').textContent=pulse.detail;
+      el('journal-count-decisions').textContent=(state.approvals||[]).filter(item=>item.status==='pending').length;
       el('overview-updated').textContent=state.monitor.last_check?'Последняя проверка: '+fmtDate(state.monitor.last_check):'Данные ещё не получены';
       const schedule=state.settings.schedule;
       el('overview-schedule').textContent=schedule?.enabled?'По расписанию · '+schedule.start+'–'+schedule.end+' МСК':'Круглосуточный мониторинг';

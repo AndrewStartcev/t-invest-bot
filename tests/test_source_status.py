@@ -47,6 +47,20 @@ class SourceStatusTests(unittest.TestCase):
             demo_admin.pulse_failure("LinMath", "history", "История недоступна")
             self.assertEqual(len(demo_admin.EVENTS), 2)
 
+    def test_partial_history_is_one_notice_instead_of_repeated_errors(self):
+        with patch.object(demo_admin, "PULSE_FAILURES", {}), patch.object(demo_admin, "add_event") as record:
+            demo_admin.pulse_history_pending("LinMath", 5)
+            demo_admin.pulse_history_pending("LinMath", 8)
+            record.assert_called_once()
+            event = record.call_args.args[0]
+            self.assertEqual(event["source"], "pulse_status")
+            self.assertEqual(event["severity"], "info")
+            self.assertIn("Получено сделок: 5", event["reason"])
+            self.assertNotIn("Ошибка", event["trade"])
+            demo_admin.pulse_recovered("LinMath", "history_partial")
+            demo_admin.pulse_history_pending("LinMath", 1)
+            self.assertEqual(record.call_count, 2)
+
     def test_source_waits_before_reporting_an_incident(self):
         with patch.object(demo_admin, "PULSE_RETRIES", {}), \
                 patch.object(demo_admin, "pulse_failure") as failure:
