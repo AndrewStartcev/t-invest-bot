@@ -1,6 +1,6 @@
 const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),vm=require('node:vm'),test=require('node:test');
 const html=fs.readFileSync(path.join(__dirname,'../demo/index.html'),'utf8');
-const code=html.slice(html.indexOf('    const settingsTabs='),html.indexOf('    function showJournalTab('));
+const code=html.slice(html.indexOf('    const settingsTabs='),html.indexOf('    function showOverviewTab('));
 function setup(){
  const keys=['general','limits','policy','api','telegram','account'];
  const tabs=keys.map(key=>({dataset:{settingsTab:key},hidden:key==='account',attrs:{},listeners:{},setAttribute(k,v){this.attrs[k]=v;},addEventListener(k,v){this.listeners[k]=v;},focus(){this.focused=true;}}));

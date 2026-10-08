@@ -17,6 +17,20 @@ class Layout(HTMLParser):
             if self.stack[i][0]==tag:self.stack=self.stack[:i];break
 
 class SettingsLayoutTests(unittest.TestCase):
+    def test_overview_details_are_tabbed_and_telegram_is_in_settings(self):
+        parsed=Layout();parsed.feed((Path(__file__).resolve().parents[1]/'demo/index.html').read_text())
+        expected={"today-list":"overview-trades", "overview-portfolio-rows":"overview-portfolio",
+                  "instrument-list":"overview-instruments", "demo-positions":"overview-results",
+                  "refresh-source":"overview-connection", "telegram-state":"settings-telegram",
+                  "telegram-test":"settings-telegram"}
+        for field,tab in expected.items():
+            with self.subTest(field=field):
+                self.assertIn(tab,[attrs.get('id') for _,attrs in parsed.ids[field][2]])
+        self.assertNotIn('hidden',parsed.ids['overview-trades'][1])
+        for tab in ['portfolio','instruments','results','connection']:
+            self.assertIn('hidden',parsed.ids['overview-'+tab][1])
+        self.assertEqual(parsed.duplicates,[])
+
     def test_fields_have_their_tabs_and_original_form_owner(self):
         parsed=Layout();parsed.feed((Path(__file__).resolve().parents[1]/'demo/index.html').read_text())
         self.assertEqual(parsed.duplicates,[])
