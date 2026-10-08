@@ -20,6 +20,10 @@ class FakeBrowser:
     def __init__(self):
         self.count = 12
 
+    def portfolio(self, url, instruments=None):
+        return {"status": "partial", "profile_url": canonical_profile_url(url), "positions": {},
+                "rows": [], "checked_at": datetime.now(timezone.utc).isoformat(), "message": "Тестовый портфель"}
+
     def snapshot(self, url, counts):
         history = [
             {"tradeDateTime": "2026-10-03T10:33:00+03:00", "action": "buy", "averagePrice": 100, "currency": "rub"},
@@ -36,6 +40,7 @@ class LiveMonitorTests(unittest.TestCase):
     def test_decreased_counter_rebases_only_that_asset_and_does_not_replay_history(self):
         from unittest.mock import MagicMock
         browser = MagicMock()
+        browser.portfolio.return_value = FakeBrowser().portfolio(demo_admin.DEFAULTS["profile_url"])
         events = []
         old_time = (datetime.now(timezone.utc)-timedelta(days=1)).isoformat()
         new_time = (datetime.now(timezone.utc)+timedelta(minutes=1)).isoformat()

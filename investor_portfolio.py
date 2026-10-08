@@ -23,9 +23,11 @@ def parse_screen(screen, profile_url, instruments):
     page = urlparse(str(screen.get("url", "")))
     match = re.fullmatch(r"/invest/(?:social|pulse)/profile/([^/]+)(?:/portfolio|/operations)?/?", page.path)
     heading = normalize_name(screen.get("heading", ""))
+    named_heading = re.fullmatch(re.escape(normalize_name(unquote(name))) + r"[.\s:—–-]+портфель", heading)
+    split_heading = heading == "портфель" and normalize_name(screen.get("author", "")) == normalize_name(unquote(name))
     if (page.hostname not in PULSE_PROFILE_HOSTS or not match
             or unquote(match.group(1)).casefold() != unquote(name).casefold()
-            or not re.fullmatch(re.escape(normalize_name(unquote(name))) + r"[.\s]+портфель", heading)
+            or not (named_heading or split_heading)
             or screen.get("portfolio") is not True):
         return result
     rows = screen.get("rows")
@@ -112,11 +114,11 @@ SCREEN_SCRIPT = r"""() => {
     const visible = e => e.getClientRects().length && getComputedStyle(e).visibility !== 'hidden';
     const headings = [...document.querySelectorAll('h1,h2,h3,[role="heading"]')]
         .filter(e => visible(e) && /портфель/i.test(e.innerText));
-    const heading = headings.find(e => /\.\s*портфель/i.test(e.innerText)) || headings[0];
+    const heading = headings.find(e => /[.\s:—–-]+портфель/i.test(e.innerText)) || headings[0];
     if (!heading) return {url:location.href,portfolio:false,rows:[]};
     let panel = heading.parentElement;
     for (let i=0; panel && i<6; i++,panel=panel.parentElement) {
-        if (panel.querySelectorAll('button,[role="tab"]').length >= 2 && /%/.test(panel.innerText)) break;
+        if (/компании/i.test(panel.innerText) && /активы/i.test(panel.innerText) && /%/.test(panel.innerText)) break;
     }
     if (!panel || panel===document.body || panel===document.documentElement
         || !/компании/i.test(panel.innerText) || !/активы/i.test(panel.innerText)
@@ -134,31 +136,42 @@ SCREEN_SCRIPT = r"""() => {
             }
         }
     }
-    return {url:location.href,heading:heading.innerText.trim(),portfolio:true,rows};
+    const nickname=decodeURIComponent(location.pathname.match(/\/profile\/([^/]+)/)?.[1]||'');
+    const author=[...document.querySelectorAll('h1,h2,h3,[role="heading"]')].find(e=>visible(e)&&e.innerText.trim().toLocaleLowerCase()===nickname.toLocaleLowerCase());
+    return {url:location.href,heading:heading.innerText.trim(),author:author?.innerText.trim()||'',portfolio:true,rows};
 }"""
 
 
 def read_visible_portfolio(browser, profile_url, instruments):
     from pulse_live import canonical_profile_url
     page = browser.context.new_page()
+    stage = "открытие профиля"
     try:
         # Open the verified profile route; follow its visible portfolio control, no API URL guessing.
         page.goto(canonical_profile_url(profile_url), wait_until="domcontentloaded", timeout=20000)
-        control = page.get_by_text("Портфель", exact=True)
+        stage = "поиск кнопки портфеля"
+        control = page.get_by_text("Портфель", exact=True).filter(visible=True)
         control.first.wait_for(state="visible", timeout=8000)
         if control.count() != 1:
             return unavailable(profile_url, "Неоднозначная кнопка портфеля автора; требуется подтверждение")
+        stage = "открытие портфеля"
         control.click(timeout=5000)
-        page.get_by_text("Компании", exact=True).first.wait_for(state="visible", timeout=8000)
-        companies = page.get_by_text("Компании", exact=True)
-        if companies.count() == 1:
-            companies.click(timeout=5000)
+        stage = "выбор раздела компаний"
+        companies = page.get_by_text("Компании", exact=True).filter(visible=True)
+        companies.first.wait_for(state="visible", timeout=8000)
+        if companies.count() != 1:
+            return unavailable(profile_url, "Неоднозначный раздел компаний портфеля; повторим проверку")
+        companies.click(timeout=5000)
+        stage = "загрузка долей компаний"
         # Wait for visible allocations, not a fixed delay.
         page.wait_for_function("() => [...document.querySelectorAll('h1,h2,h3,[role=heading]')].some(e => /портфель/i.test(e.innerText)) && /\\d+[.,]?\\d*\\s*%/.test(document.body.innerText)", timeout=8000)
-        return parse_screen(page.evaluate(SCREEN_SCRIPT), profile_url, instruments)
+        result = parse_screen(page.evaluate(SCREEN_SCRIPT), profile_url, instruments)
+        if result["status"] == "unavailable":
+            result["message"] = "Пульс открыл портфель, но строки с долями не распознаны; повторим проверку"
+        return result
     except Exception:
         # No bank body, URL parameters, cookies or credentials in errors.
-        return unavailable(profile_url)
+        return unavailable(profile_url, "Портфель пока не прочитан: " + stage + "; повторим проверку")
     finally:
         try:
             page.close()

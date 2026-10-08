@@ -879,9 +879,20 @@ def poll_once(browser: PulseBrowser, settings: dict, *, emit_events: bool = True
                        instruments=[{key: item.get(key) for key in ("ticker", "classCode", "showName", "type", "totalOperationsCount", "maxTradeDateTime")} for item in instruments],
                        last_check=datetime.now(timezone.utc).isoformat(), phase="portfolio",
                        progress="Список инструментов получен; проверяем портфель автора")
-    portfolio = portfolio_unavailable(settings["profile_url"], "Проверка портфеля автора выключена")
+    # Viewing the author's holdings does not enable trading confirmation rules.
+    with LOCK:
+        cached = INVESTOR_PORTFOLIO.copy()
+    portfolio = portfolio_unavailable(settings["profile_url"], "Портфель автора ещё не проверен")
     warnings = []
-    if settings["policy"]["enabled"]:
+    cache_fresh = False
+    try:
+        age = (datetime.now(timezone.utc) - datetime.fromisoformat(cached["checked_at"])).total_seconds()
+        cache_fresh = cached.get("profile_url") == canonical_profile_url(settings["profile_url"]) and cached.get("status") != "unavailable" and 0 <= age < 300
+    except (KeyError, ValueError, TypeError):
+        pass
+    if not settings["policy"]["enabled"] and cache_fresh:
+        portfolio = cached
+    else:
         try:
             portfolio = browser.portfolio(settings["profile_url"], instruments)
             if (not isinstance(portfolio, dict) or portfolio.get("profile_url") != canonical_profile_url(settings["profile_url"])
@@ -889,13 +900,14 @@ def poll_once(browser: PulseBrowser, settings: dict, *, emit_events: bool = True
                 portfolio = portfolio_unavailable(settings["profile_url"])
             if portfolio.get("status") == "unavailable":
                 message = portfolio.get("message", "Портфель автора недоступен")
-                pulse_failure(settings["profile_url"], "portfolio", message)
+                pulse_retry("portfolio:" + settings["profile_url"], "portfolio", message)
                 warnings.append("Портфель автора: " + message)
             else:
-                pulse_recovered(settings["profile_url"], "portfolio")
+                pulse_recovered("portfolio:" + settings["profile_url"], "portfolio")
+                PULSE_RETRIES.pop("portfolio:" + settings["profile_url"], None)
         except Exception as error:
             message = str(error) if isinstance(error, PulseError) else "Не удалось прочитать портфель автора"
-            pulse_failure(settings["profile_url"], "portfolio", message)
+            pulse_retry("portfolio:" + settings["profile_url"], "portfolio", message)
             warnings.append("Портфель автора: " + message)
             portfolio = portfolio_unavailable(settings["profile_url"])
     compare_positions(portfolio, previous_portfolios.get(canonical_profile_url(settings["profile_url"])))
@@ -1775,6 +1787,7 @@ class Handler(BaseHTTPRequestHandler):
                     if MONITOR["status"] != "checking":
                         MONITOR.update(status="checking", phase="authorization", warning="",
                                        progress="Проверяем авторизацию Пульса", message="Проверяем авторизацию Пульса")
+                        INVESTOR_PORTFOLIO.pop("checked_at", None)
                         HISTORY_REQUESTS.put({"action": "source_refresh"})
                 self.respond(202, {"ok": True})
             elif self.path == "/api/auth/check":

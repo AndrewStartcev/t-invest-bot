@@ -1,0 +1,11 @@
+const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict'),path=require('node:path');
+const html=fs.readFileSync(path.join(__dirname,'../demo/index.html'),'utf8');
+const code=html.slice(html.indexOf('    function authorPortfolioView('),html.indexOf('    function renderInvestorPortfolio('));
+const ctx={fmtDate:x=>x};vm.createContext(ctx);vm.runInContext(code,ctx);
+const state={auth:{status:'checking'},monitor:{status:'checking',phase:'portfolio'},settings:{profile_url:'author'},investor_portfolio:{profile_url:'author',rows:[{name:'Old',percent:'1'}]}};
+assert.equal(ctx.authorPortfolioView(state).rows.length,0);
+state.auth.status='authenticated';state.investor_portfolio={profile_url:'other',rows:[{name:'Old',percent:'1'}]};assert.equal(ctx.authorPortfolioView(state).rows.length,0);
+state.investor_portfolio={profile_url:'author',rows:[]};assert.match(ctx.authorPortfolioView(state).message,/Загружаем/);
+state.monitor.status='running';assert.match(ctx.authorPortfolioView(state).empty,/Проверка повторится/);
+state.investor_portfolio.rows=[{name:'New',percent:'2'}];assert.equal(ctx.authorPortfolioView(state).rows[0].name,'New');
+console.log('Author portfolio states passed');

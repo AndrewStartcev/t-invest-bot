@@ -16,6 +16,41 @@ class InvestorPortfolioTests(unittest.TestCase):
     def screen(self, text="Роснефть 0,02%", links=None):
         return {"url": PROFILE, "heading": "LinMath. Портфель", "portfolio": True, "rows": [{"text": text, "links": links or []}]}
 
+    def test_separate_author_heading_requires_verified_author_identity(self):
+        screen={**self.screen(), "heading":"Портфель", "author":"LinMath"}
+        self.assertEqual(parse_screen(screen, PROFILE, INSTRUMENTS)["status"],"partial")
+        screen["author"]="Other"
+        self.assertEqual(parse_screen(screen, PROFILE, INSTRUMENTS)["status"],"unavailable")
+        screen.pop("author")
+        self.assertEqual(parse_screen(screen, PROFILE, INSTRUMENTS)["status"],"unavailable")
+        self.assertEqual(parse_screen({**self.screen(), "heading":"LinMath — Портфель"}, PROFILE, INSTRUMENTS)["status"],"partial")
+
+    def test_portfolio_display_loads_with_policy_off_and_policy_on_reads_fresh(self):
+        import copy, tempfile
+        from datetime import datetime, timezone
+        from unittest.mock import patch
+        import demo_admin
+        browser=Mock()
+        browser.snapshot.return_value=("LinMath", [])
+        browser.portfolio.return_value={"status":"partial", "profile_url":PROFILE, "positions":{},
+                                        "rows":[{"name":"Роснефть","percent":"1"}],
+                                        "checked_at":datetime.now(timezone.utc).isoformat()}
+        settings=copy.deepcopy(demo_admin.DEFAULTS);settings["profile_url"]=PROFILE;settings["policy"]["enabled"]=False
+        with tempfile.TemporaryDirectory() as folder, \
+                patch.object(demo_admin,"STATE_PATH",Path(folder)/"state.json"), \
+                patch.object(demo_admin,"INVESTOR_PORTFOLIO",{}), \
+                patch.object(demo_admin,"AUTH",{}),patch.object(demo_admin,"MONITOR",{}), \
+                patch.object(demo_admin,"TODAY",[]),patch.object(demo_admin,"recent_profile_trades",return_value=[]), \
+                patch.object(demo_admin,"prepare_real") as real:
+            demo_admin.poll_once(browser,settings,emit_events=False)
+            self.assertEqual(demo_admin.INVESTOR_PORTFOLIO["rows"][0]["name"],"Роснефть")
+            demo_admin.poll_once(browser,settings,emit_events=False)
+            self.assertEqual(browser.portfolio.call_count,1)
+            settings["policy"]["enabled"]=True
+            demo_admin.poll_once(browser,settings,emit_events=False)
+            self.assertEqual(browser.portfolio.call_count,2)
+            real.assert_not_called()
+
     def test_visible_company_establishes_presence_not_absence(self):
         snapshot = parse_screen(self.screen(), PROFILE, INSTRUMENTS)
         self.assertEqual(snapshot["status"], "partial")
