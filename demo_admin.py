@@ -855,22 +855,44 @@ def poll_once(browser: PulseBrowser, settings: dict, *, emit_events: bool = True
         raise PulseError("Файл состояния повреждён")
     updates = {}
     fresh = []
+    rebases_by_profile = state.get("_counter_rebases", {})
+    if not isinstance(rebases_by_profile, dict):
+        raise PulseError("Состояние счётчиков повреждено")
+    rebases = rebases_by_profile.get(profile, {}).copy()
+    reset_keys = []
     for item in instruments:
         key = f"{item['ticker']}:{item['classCode']}"
         count = item["totalOperationsCount"]
         old = previous.get(key)
         if old is not None:
-            if type(old) is not int or count < old:
-                raise PulseError(f"Счётчик {key} уменьшился; требуется проверка")
+            if type(old) is not int:
+                raise PulseError(f"Счётчик {key} повреждён")
+            if count < old:
+                # Upstream counters may change after a domain switch or correction.
+                # Establish a fresh baseline; never replay the corrected history.
+                prior_generation = rebases.get(key, {}).get("generation", 0)
+                rebases[key] = {"generation": prior_generation + 1,
+                                "after": datetime.now(timezone.utc).isoformat()}
+                reset_keys.append(key)
+                updates[key] = count
+                print(f"Пульс: обновлена точка отсчёта {profile}/{key}; старые сделки не повторяются", flush=True)
+                continue
             delta = count - old
             if delta > len(item["history"]):
                 raise PulseError(f"История {key} неполная")
             for sequence, trade in enumerate(reversed(item["history"][:delta]), start=old + 1):
                 if trade.get("action") not in {"buy", "sell"} or not trade.get("tradeDateTime"):
                     raise PulseError(f"Сделка {key} имеет неизвестный формат")
+                if key in rebases:
+                    trade_time = datetime.fromisoformat(trade["tradeDateTime"])
+                    if trade_time.tzinfo is None:
+                        raise PulseError(f"Время сделки {key} не содержит часовой пояс")
+                    if trade_time <= datetime.fromisoformat(rebases[key]["after"]):
+                        continue
                 fresh.append((item, trade, sequence))
         updates[key] = count
     state[profile] = {**previous, **updates}
+    state["_counter_rebases"] = {**rebases_by_profile, profile: rebases}
     state["_portfolios"] = {**previous_portfolios, canonical_profile_url(settings["profile_url"]): portfolio}
     # Commit the watermark before side effects: a retry cannot create a second demo purchase.
     write_state(STATE_PATH, state)
@@ -885,6 +907,8 @@ def poll_once(browser: PulseBrowser, settings: dict, *, emit_events: bool = True
                           else "Список получен; история за 24 часа временно недоступна")
     if session_warning:
         recent_message += "; браузерную сессию не удалось сохранить"
+    if reset_keys:
+        recent_message += f"; обновлена точка отсчёта для {len(reset_keys)} инструментов без повторения старых сделок"
     with LOCK:
         MONITOR.update(status="running", phase="ready", progress=recent_message, message=recent_message, last_check=datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds"), profile=profile, instrument_count=len(instruments),
                        instruments=[{key: item.get(key) for key in ("ticker", "classCode", "showName", "type", "totalOperationsCount", "maxTradeDateTime")} for item in instruments])
@@ -898,6 +922,9 @@ def poll_once(browser: PulseBrowser, settings: dict, *, emit_events: bool = True
             break
         side = trade["action"]
         source_key = f"{profile}:{item['ticker']}:{item['classCode']}:{sequence}"
+        generation = rebases.get(f"{item['ticker']}:{item['classCode']}", {}).get("generation", 0)
+        if generation:
+            source_key += f":generation-{generation}"
         event = {
             "time": datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds"),
             "trade_time": trade["tradeDateTime"], "profile": profile,

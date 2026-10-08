@@ -33,6 +33,43 @@ class FakeBrowser:
 
 
 class LiveMonitorTests(unittest.TestCase):
+    def test_decreased_counter_rebases_only_that_asset_and_does_not_replay_history(self):
+        from unittest.mock import MagicMock
+        browser = MagicMock()
+        events = []
+        old_time = (datetime.now(timezone.utc)-timedelta(days=1)).isoformat()
+        new_time = (datetime.now(timezone.utc)+timedelta(minutes=1)).isoformat()
+        def item(ticker, count, date):
+            return {"ticker": ticker, "classCode": "TQBR", "showName": ticker, "type": "stock",
+                    "totalOperationsCount": count, "maxTradeDateTime": date,
+                    "history": [{"tradeDateTime": date, "action": "buy", "averagePrice": 100, "currency": "rub"}]}
+        with tempfile.TemporaryDirectory() as root, \
+                patch.object(demo_admin, "STATE_PATH", Path(root)/"state.json"), \
+                patch.object(demo_admin, "AUTH", {}), patch.object(demo_admin, "MONITOR", {}), \
+                patch.object(demo_admin, "TODAY", []), patch.object(demo_admin, "INVESTOR_PORTFOLIO", {}), \
+                patch.object(demo_admin, "recent_profile_trades", return_value=[]), \
+                patch.object(demo_admin, "add_event", side_effect=events.append), \
+                patch.object(demo_admin, "notify"), patch.object(demo_admin, "prepare_real") as real, \
+                patch.object(demo_admin, "schedule_open", return_value=True):
+            demo_admin.STATE_PATH.write_text(json.dumps({"LinMath": {"RESET:TQBR": 13, "HEALTHY:TQBR": 5}}))
+            browser.snapshot.return_value = ("LinMath", [item("RESET", 7, old_time), item("HEALTHY", 6, new_time)])
+            demo_admin.poll_once(browser, demo_admin.DEFAULTS)
+            self.assertEqual([event["instrument"] for event in events], ["HEALTHY"])
+            self.assertEqual(demo_admin.AUTH["status"], "authenticated")
+            self.assertEqual(demo_admin.MONITOR["status"], "running")
+            self.assertEqual(json.loads(demo_admin.STATE_PATH.read_text())["LinMath"]["RESET:TQBR"], 7)
+            # Old corrected history remains skipped after a new poll/restart.
+            browser.snapshot.return_value = ("LinMath", [item("RESET", 8, old_time), item("HEALTHY", 6, new_time)])
+            demo_admin.poll_once(browser, demo_admin.DEFAULTS)
+            self.assertEqual(len(events), 1)
+            browser.snapshot.return_value = ("LinMath", [item("RESET", 9, new_time), item("HEALTHY", 6, new_time)])
+            demo_admin.poll_once(browser, demo_admin.DEFAULTS)
+            self.assertEqual(len(events), 2)
+            self.assertEqual(events[-1]["source_key"], "LinMath:RESET:TQBR:9:generation-1")
+            demo_admin.poll_once(browser, demo_admin.DEFAULTS)
+            self.assertEqual(len(events), 2)
+            real.assert_not_called()
+
     def test_verified_instruments_are_visible_before_recent_history_finishes(self):
         browser = FakeBrowser()
         def slow_history(*args, **kwargs):
