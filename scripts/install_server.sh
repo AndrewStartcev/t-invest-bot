@@ -39,6 +39,7 @@ EOF
 fi
 chmod 600 /etc/t-invest-bot/server.env
 bash "$PROJECT/scripts/install_broker_ca.sh"
+bash "$PROJECT/scripts/install_pulse_ca.sh"
 if [[ ! -f /etc/nginx/t-invest-bot.htpasswd ]]; then
     echo "Задай пароль входа в панель для пользователя admin:"
     htpasswd -cB /etc/nginx/t-invest-bot.htpasswd admin
