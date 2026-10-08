@@ -53,7 +53,7 @@ class InvestorPortfolioTests(unittest.TestCase):
         self.assertEqual(current["positions"]["ROSN:TQBR"]["weight_change"], "unknown")
 
     def test_wrong_author_host_and_route_are_rejected(self):
-        for url in (PROFILE.replace("LinMath", "Other"), PROFILE.replace("www.tbank-online.com", "evil.example"),
+        for url in (PROFILE.replace("LinMath", "Other"), PROFILE.replace("www.tbank.ru", "evil.example"),
                     PROFILE + "post/123/"):
             screen = {**self.screen(), "url": url}
             self.assertEqual(parse_screen(screen, PROFILE, INSTRUMENTS)["positions"], {})

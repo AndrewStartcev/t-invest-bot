@@ -484,7 +484,7 @@ class LiveMonitorTests(unittest.TestCase):
     def test_profile_and_cursor(self):
         self.assertEqual(operations_url("https://www.tbank.ru/invest/social/profile/LinMath/")[0], "LinMath")
         self.assertEqual(operations_url("https://www.tbank-online.com/invest/social/profile/LinMath/")[1],
-                         "https://www.tbank-online.com/invest/pulse/profile/LinMath/operations/")
+                         "https://www.tbank.ru/invest/pulse/profile/LinMath/operations/")
         self.assertEqual(canonical_profile_url("https://www.tbank.ru/invest/social/profile/LinMath/"),
                          demo_admin.DEFAULTS["profile_url"])
         self.assertTrue(is_operations_page("https://www.tbank-online.com/invest/pulse/profile/LinMath/operations/",

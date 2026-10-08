@@ -17,6 +17,17 @@ from short_simulation import simulate_with_short
 
 
 class TradeWorkflowTests(unittest.TestCase):
+    def test_legacy_domain_asset_consent_survives_switch_to_ru(self):
+        with tempfile.TemporaryDirectory() as root:
+            root = Path(root)
+            key = json.dumps(["https://www.tbank-online.com/invest/social/profile/LinMath/", "account", "ROSN", "TQBR"])
+            (root / "asset-consents.json").write_text(json.dumps({key: True}))
+            approvals = Approvals(root)
+            self.assertTrue(approvals.trusted(self.signal(), self.settings(), "account"))
+            self.assertFalse(approvals.trusted(self.signal(), self.settings(), "other-account"))
+            approvals.set_trusted(self.signal(), self.settings(), "account", False)
+            self.assertFalse(Approvals(root).trusted(self.signal(), self.settings(), "account"))
+
     def settings(self):
         return {**copy.deepcopy(demo_admin.DEFAULTS), "chat_id": "12345", "monitoring_enabled": True, "real_mode": "confirm"}
 

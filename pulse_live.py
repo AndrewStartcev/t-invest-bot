@@ -17,8 +17,8 @@ class PulseError(Exception):
     pass
 
 
-PULSE_WEB_HOST = "www.tbank-online.com"
-PULSE_PROFILE_HOSTS = {"tbank.ru", "www.tbank.ru", "tbank-online.com", PULSE_WEB_HOST}
+PULSE_WEB_HOST = "www.tbank.ru"
+PULSE_PROFILE_HOSTS = {"tbank.ru", PULSE_WEB_HOST, "tbank-online.com", "www.tbank-online.com"}
 
 
 def visible_browser_windows() -> dict[int, int]:

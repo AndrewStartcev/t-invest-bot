@@ -6,6 +6,7 @@ import threading
 import time
 
 from pulse_replay import write_state
+from pulse_live import canonical_profile_url, PulseError
 
 
 def fingerprint(settings):
@@ -19,9 +20,22 @@ class Approvals:
         self.lock = threading.RLock()
         self.rows = json.loads(self.path.read_text()) if self.path.exists() else {}
         self.consents = json.loads(self.consents_path.read_text()) if self.consents_path.exists() else {}
+        # Domain changes must not discard an operator's author/account/asset consent.
+        normalized = {}
+        for key, enabled in self.consents.items():
+            try:
+                parts = json.loads(key)
+                if not isinstance(parts, list) or len(parts) != 4:
+                    raise ValueError("Invalid consent key")
+                parts[0] = canonical_profile_url(parts[0])
+                key = json.dumps(parts)
+            except (ValueError, TypeError, PulseError):
+                pass
+            normalized[key] = enabled if key not in normalized else normalized[key] is True and enabled is True
+        self.consents = normalized
 
     def consent_key(self, signal, settings, account):
-        return json.dumps([settings["profile_url"], account, signal["ticker"], signal["classCode"]])
+        return json.dumps([canonical_profile_url(settings["profile_url"]), account, signal["ticker"], signal["classCode"]])
 
     def trusted(self, signal, settings, account):
         with self.lock:

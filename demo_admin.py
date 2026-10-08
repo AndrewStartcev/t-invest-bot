@@ -47,7 +47,7 @@ TRADE_TOKEN_PATH = DATA_DIR / "broker-trade-token.txt"
 TRADE_ACCOUNT_PATH = DATA_DIR / "trade-account.txt"
 REAL_ORDERS_PATH = DATA_DIR / "real-orders.json"
 DEFAULTS = {
-    "profile_url": "https://www.tbank-online.com/invest/social/profile/LinMath/",
+    "profile_url": "https://www.tbank.ru/invest/social/profile/LinMath/",
     "poll_seconds": 30,
     "chat_id": "",
     "paused": False,
@@ -1389,6 +1389,7 @@ class Handler(BaseHTTPRequestHandler):
             if self.path == "/source-admin/api/state":
                 with LOCK:
                     self.respond(200, {"auth": AUTH.copy(), "status": MONITOR["status"],
+                                       "message": MONITOR["message"],
                                        "last_check": MONITOR["last_check"]})
                 return
             if self.path not in {"/source-admin", "/source-admin/"}:

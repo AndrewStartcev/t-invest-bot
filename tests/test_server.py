@@ -182,7 +182,8 @@ class ServerTests(unittest.TestCase):
                 self.assertNotIn("owner-only-detail", json.dumps(client_state))
                 with request("/source-admin/api/state", secret=key) as response:
                     owner_state = json.load(response)
-                self.assertEqual(set(owner_state), {"auth", "status", "last_check"})
+                self.assertEqual(set(owner_state), {"auth", "status", "message", "last_check"})
+                self.assertEqual(owner_state["message"], demo_admin.MONITOR["message"])
                 self.assertEqual(owner_state["auth"]["message"], "owner-only-detail")
                 with self.assertRaises(HTTPError) as failure:
                     request("/source-admin/api/start", True, key, "https://evil.example")
