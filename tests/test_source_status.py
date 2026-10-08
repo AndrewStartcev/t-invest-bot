@@ -27,6 +27,26 @@ def client_server():
 
 
 class SourceStatusTests(unittest.TestCase):
+    def test_diagnostic_is_persisted_once_and_repeats_after_recovery(self):
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+        with TemporaryDirectory() as folder, patch.object(demo_admin, "EVENTS", []), \
+                patch.object(demo_admin, "PULSE_FAILURES", {}), \
+                patch.object(demo_admin, "EVENTS_PATH", Path(folder) / "events.json"), \
+                patch.object(demo_admin, "notify") as notify:
+            for _ in range(3):
+                demo_admin.pulse_failure("LinMath", "history", "История недоступна")
+            stored = json.loads(demo_admin.EVENTS_PATH.read_text())
+            self.assertEqual(len(stored), 1)
+            self.assertEqual(stored[0]["source"], "pulse_error")
+            self.assertIn("Загрузка сделок", stored[0]["reason"])
+            self.assertNotIn("real_status", stored[0])
+            self.assertTrue(stored[0]["time"])
+            notify.assert_not_called()
+            demo_admin.pulse_recovered("LinMath", "history")
+            demo_admin.pulse_failure("LinMath", "history", "История недоступна")
+            self.assertEqual(len(demo_admin.EVENTS), 2)
+
     def test_failed_read_is_visible_without_exposing_stale_trades(self):
         message = "Общий источник временно недоступен"
         monitor = {**demo_admin.MONITOR, "status": "error", "message": message,

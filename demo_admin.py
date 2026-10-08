@@ -64,6 +64,7 @@ LOCK = threading.RLock()
 TRADE_FLOW_LOCK = threading.Lock()
 BROKER_REFRESH_LOCK = threading.Lock()
 HISTORY_REQUESTS = queue.Queue()
+PULSE_FAILURES: dict[tuple[str, str], str] = {}
 MONITOR = {"status": "stopped", "message": "Мониторинг выключен", "last_check": None, "profile": "", "instrument_count": 0, "instruments": []}
 AUTH = {"status": "checking", "message": "Проверяем сохранённый вход в Пульс"}
 TODAY: list[dict] = []
@@ -330,6 +331,30 @@ def add_event(event: dict) -> None:
         EVENTS.insert(0, event)
         del EVENTS[200:]
         write_state(EVENTS_PATH, EVENTS)
+
+
+PULSE_PHASES = {"authorization": "Проверка авторизации", "instruments": "Загрузка автора",
+                "portfolio": "Проверка портфеля автора", "history": "Загрузка сделок"}
+
+
+def pulse_failure(profile: str, phase: str, message: str) -> None:
+    """Persist one diagnostic per incident in this client's journal. No notifications/orders."""
+    with LOCK:
+        key = (profile, phase)
+        if PULSE_FAILURES.get(key) == message:
+            return
+        add_event({"time": datetime.now(timezone.utc).isoformat(), "source": "pulse_error",
+                   "profile": profile, "instrument": "Пульс", "price": "—",
+                   "trade": "Ошибка обновления", "phase": phase,
+                   "reason": PULSE_PHASES.get(phase, "Обновление данных") + ": " + message,
+                   "notification": "—"})
+        PULSE_FAILURES[key] = message
+    print("Пульс: " + phase + ": " + message.replace("\n", " ")[:240], flush=True)
+
+
+def pulse_recovered(profile: str, phase: str) -> None:
+    with LOCK:
+        PULSE_FAILURES.pop((profile, phase), None)
 
 
 def apply_demo(event: dict, signal: dict, settings: dict) -> None:
@@ -729,7 +754,10 @@ def recent_profile_trades(browser: PulseBrowser, profile: str, instruments: list
     cutoff = cutoff or datetime.now(timezone.utc) - timedelta(days=1)
     deadline = time.monotonic() + budget_seconds
     found = []
-    for item in month_targets(instruments, cutoff):
+    targets = month_targets(instruments, cutoff)
+    for index, item in enumerate(targets, 1):
+        with LOCK:
+            MONITOR.update(progress=f"Загружаем сделки: {index} из {len(targets)} · {item['ticker']}")
         cursor = None
         seen_cursors = set()
         occurrences = {}
@@ -813,7 +841,8 @@ def advance_month_scan(browser: PulseBrowser, scan: dict, batch_size: int = 1) -
 def poll_once(browser: PulseBrowser, settings: dict, *, emit_events: bool = True) -> None:
     settings = {**DEFAULTS, **settings}
     with LOCK:
-        MONITOR.update(status="checking", phase="instruments", progress="Читаем список инструментов автора")
+        MONITOR.update(status="checking", phase="instruments", progress="Загружаем автора и список инструментов",
+                       started_at=datetime.now(timezone.utc).isoformat(), warning="")
     state = json.loads(STATE_PATH.read_text(encoding="utf-8")) if STATE_PATH.exists() else {}
     previous_portfolios = state.get("_portfolios", {})
     if not isinstance(previous_portfolios, dict):
@@ -821,6 +850,8 @@ def poll_once(browser: PulseBrowser, settings: dict, *, emit_events: bool = True
     profile, _ = operations_url(settings["profile_url"])
     previous = state.get(profile, {})
     profile, instruments = browser.snapshot(settings["profile_url"], previous)
+    pulse_recovered(settings["profile_url"], "instruments")
+    pulse_recovered(settings["profile_url"], "authorization")
     # A verified snapshot is immediately useful; optional portfolio/history reads
     # must not keep the entire cabinet empty or postpone confirmation of access.
     with LOCK:
@@ -830,13 +861,23 @@ def poll_once(browser: PulseBrowser, settings: dict, *, emit_events: bool = True
                        last_check=datetime.now(timezone.utc).isoformat(), phase="portfolio",
                        progress="Список инструментов получен; проверяем портфель автора")
     portfolio = portfolio_unavailable(settings["profile_url"], "Проверка портфеля автора выключена")
+    warnings = []
     if settings["policy"]["enabled"]:
         try:
             portfolio = browser.portfolio(settings["profile_url"], instruments)
             if (not isinstance(portfolio, dict) or portfolio.get("profile_url") != canonical_profile_url(settings["profile_url"])
                     or not isinstance(portfolio.get("positions"), dict)):
                 portfolio = portfolio_unavailable(settings["profile_url"])
-        except Exception:
+            if portfolio.get("status") == "unavailable":
+                message = portfolio.get("message", "Портфель автора недоступен")
+                pulse_failure(settings["profile_url"], "portfolio", message)
+                warnings.append("Портфель автора: " + message)
+            else:
+                pulse_recovered(settings["profile_url"], "portfolio")
+        except Exception as error:
+            message = str(error) if isinstance(error, PulseError) else "Не удалось прочитать портфель автора"
+            pulse_failure(settings["profile_url"], "portfolio", message)
+            warnings.append("Портфель автора: " + message)
             portfolio = portfolio_unavailable(settings["profile_url"])
     compare_positions(portfolio, previous_portfolios.get(canonical_profile_url(settings["profile_url"])))
     with LOCK:
@@ -853,6 +894,8 @@ def poll_once(browser: PulseBrowser, settings: dict, *, emit_events: bool = True
             session_warning = True
     if not isinstance(previous, dict):
         raise PulseError("Файл состояния повреждён")
+    with LOCK:
+        MONITOR.update(phase="history", progress="Проверяем новые сделки автора")
     updates = {}
     fresh = []
     rebases_by_profile = state.get("_counter_rebases", {})
@@ -901,7 +944,11 @@ def poll_once(browser: PulseBrowser, settings: dict, *, emit_events: bool = True
     try:
         recent = recent_profile_trades(browser, profile, instruments)
         recent_message = "Данные Пульса получены"
+        pulse_recovered(settings["profile_url"], "history")
     except Exception as error:
+        message = str(error) if isinstance(error, PulseError) else "Не удалось загрузить историю сделок"
+        pulse_failure(settings["profile_url"], "history", message)
+        warnings.append("Сделки: " + message)
         recent = getattr(error, "partial_trades", [])
         recent_message = ("Список получен; история за 24 часа загружена частично" if recent
                           else "Список получен; история за 24 часа временно недоступна")
@@ -910,7 +957,7 @@ def poll_once(browser: PulseBrowser, settings: dict, *, emit_events: bool = True
     if reset_keys:
         recent_message += f"; обновлена точка отсчёта для {len(reset_keys)} инструментов без повторения старых сделок"
     with LOCK:
-        MONITOR.update(status="running", phase="ready", progress=recent_message, message=recent_message, last_check=datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds"), profile=profile, instrument_count=len(instruments),
+        MONITOR.update(status="running", phase="ready", warning="; ".join(warnings), progress=recent_message, message=recent_message, last_check=datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds"), profile=profile, instrument_count=len(instruments),
                        instruments=[{key: item.get(key) for key in ("ticker", "classCode", "showName", "type", "totalOperationsCount", "maxTradeDateTime")} for item in instruments])
         TODAY[:] = recent
         AUTH.update(status="authenticated", message="Вход в Пульс подтверждён")
@@ -1321,7 +1368,8 @@ def remote_monitor_loop() -> None:
             with LOCK:
                 AUTH.update(status="checking", message="Проверяем общий источник")
                 TODAY.clear()
-                MONITOR.update(status="checking", instruments=[], profile="", last_check=None)
+                MONITOR.update(status="checking", instruments=[], profile="", last_check=None,
+                               phase="authorization", progress="Проверяем авторизацию Пульса", warning="")
                 MONTH.update(status="idle", items=[], processed=0, total=0, message="", loaded_at=None)
         try:
             request = HISTORY_REQUESTS.get(timeout=0.1 if month_scan else 0.5)
@@ -1360,9 +1408,11 @@ def remote_monitor_loop() -> None:
                 message = str(error) if isinstance(error, PulseError) else "Ошибка чтения общего источника"
                 print("Пульс: обновление кабинета прервано на этапе " + MONITOR.get("phase", "подключение")
                       + " (" + type(error).__name__ + "): " + message.replace("\n", " ")[:240], flush=True)
+                failed_phase = MONITOR.get("phase", "authorization")
+                pulse_failure(profile, failed_phase, message)
                 with LOCK:
                     AUTH.update(status="required", message=message)
-                    MONITOR.update(status="error", message=message, phase="retry",
+                    MONITOR.update(status="error", message=message, phase=failed_phase,
                                    progress="Ожидаем данные общего источника; проверка повторится автоматически")
             next_poll = time.monotonic() + settings["poll_seconds"]
             if not schedule_open(settings):
@@ -1701,13 +1751,15 @@ class Handler(BaseHTTPRequestHandler):
                     raise ValueError("Проверка общего источника доступна в кабинете клиента")
                 with LOCK:
                     if MONITOR["status"] != "checking":
-                        MONITOR.update(status="checking", message="Обновляем данные общего источника…")
+                        MONITOR.update(status="checking", phase="authorization", warning="",
+                                       progress="Проверяем авторизацию Пульса", message="Проверяем авторизацию Пульса")
                         HISTORY_REQUESTS.put({"action": "source_refresh"})
                 self.respond(202, {"ok": True})
             elif self.path == "/api/auth/check":
                 with LOCK:
                     if AUTH["status"] == "authenticated":
-                        MONITOR.update(status="checking", message="Обновляем данные Пульса…")
+                        MONITOR.update(status="checking", phase="authorization", warning="",
+                                       progress="Проверяем авторизацию Пульса", message="Проверяем авторизацию Пульса")
                         HISTORY_REQUESTS.put({"action": "auth_check"})
                     elif AUTH["status"] != "checking":
                         AUTH.update(status="checking", message="Проверяем сделки Пульса…")

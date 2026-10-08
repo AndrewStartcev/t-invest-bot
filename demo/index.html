@@ -25,10 +25,10 @@
     .side-foot { margin-top:auto; border-top:1px solid #30435e; padding:17px 12px 0; font-size:11px; line-height:1.55; color:#96a9c2; }
     .side-foot b { display:block; color:#dce6f3; font-size:12px; }
     .main { margin-left:230px; min-width:0; }
-    .topbar { height:68px; display:flex; justify-content:space-between; align-items:center; padding:0 36px; background:#fff; border-bottom:1px solid #e3e9f0; }
+    .topbar { min-height:68px; gap:12px; flex-wrap:wrap; display:flex; justify-content:space-between; align-items:center; padding:10px 36px; background:#fff; border-bottom:1px solid #e3e9f0; }
     .breadcrumb { color:#74849a; font-size:12px; font-weight:620; }
     .breadcrumb b { color:#263a55; }
-    .top-right { display:flex; gap:13px; align-items:center; font-size:11px; color:#61738c; }
+    .top-right { display:flex; flex-wrap:wrap; gap:13px; align-items:center; font-size:11px; color:#61738c; }
     .badge { border:1px solid #e8cc8c; border-radius:5px; background:#fff8e7; color:#795718; padding:6px 9px; font-weight:790; letter-spacing:.05em; }
     .content { max-width:1450px; margin:0 auto; padding:32px 36px 60px; }
     .page-head { display:flex; justify-content:space-between; align-items:flex-end; gap:16px; margin-bottom:24px; }
@@ -36,8 +36,8 @@
     h2 { margin:0; font-size:15px; font-weight:750; }
     p { margin:0; }
     .subtle { color:#73839a; font-size:12px; line-height:1.55; }
-    .live-status { display:flex; align-items:center; gap:7px; white-space:nowrap; color:#49607e; font-size:12px; font-weight:700; }
-    .dot { width:8px; height:8px; border-radius:50%; background:#e2aa40; }
+    .live-status { display:flex; align-items:center; gap:7px; white-space:normal; max-width:380px; color:#49607e; font-size:12px; font-weight:700; }
+    .dot { flex-shrink:0; width:8px; height:8px; border-radius:50%; background:#e2aa40; }
     .dot.good { background:#38a976; }
     .dot.bad { background:#d76a63; }
     .dot.loading { width:14px; height:14px; flex:none; background:transparent; border:2px solid #dce5f0; border-top-color:#e2aa40; animation:pulse-loading .8s linear infinite; }
@@ -163,7 +163,7 @@
       .sidebar { position:static; width:auto; height:auto; padding:13px 15px; }
       .brand { padding:0 0 12px; } .side-caption,.side-foot { display:none; }
       .nav { display:flex; overflow:auto; } .nav button { width:auto; white-space:nowrap; padding:10px 12px; }
-      .main { margin:0; }.topbar { height:52px; padding:0 17px; }.top-right span:first-child { display:none; }
+      .main { margin:0; }.topbar { min-height:52px; padding:10px 17px; }.top-right > #trade-top-status { display:none; }
       .content { padding:24px 16px 40px; }.page-head { align-items:flex-start; }.live-status { font-size:11px; }
       .cards { gap:9px; }.card { min-height:94px; padding:13px; }.card strong { font-size:22px; }
       .field-row { grid-template-columns:1fr; gap:0; }.panel-body { padding:16px; }
@@ -216,10 +216,10 @@
       <div class="side-foot" id="panel-location"><b>Локальная панель</b>Данные сеанса остаются на этом компьютере</div>
     </aside>
     <main class="main">
-        <div class="topbar"><span class="breadcrumb">Пульс / <b id="breadcrumb">Обзор</b></span><div class="top-right"><a class="button neutral small" id="server-browser-top" target="_blank" rel="noopener noreferrer" hidden>Браузер Пульса</a><button class="button neutral small" type="button" id="connect-pulse" hidden>Подключить Пульс</button><span id="trade-top-status">Брокерские заявки отключены</span><span class="badge" id="mode-badge">Мониторинг выключен</span></div></div>
+        <div class="topbar"><span class="breadcrumb">Пульс / <b id="breadcrumb">Обзор</b></span><div class="top-right"><div class="live-status" role="status" aria-live="polite"><i class="dot loading" id="source-dot" aria-hidden="true"></i><span id="source-status">Проверяем авторизацию Пульса</span></div><a class="button neutral small" id="server-browser-top" target="_blank" rel="noopener noreferrer" hidden>Браузер Пульса</a><button class="button neutral small" type="button" id="connect-pulse" hidden>Подключить Пульс</button><span id="trade-top-status">Брокерские заявки отключены</span><span class="badge" id="mode-badge">Мониторинг выключен</span></div></div>
       <div class="content">
         <section class="view active" id="view-overview">
-          <div class="page-head"><div><h1>Обзор</h1><p class="subtle" id="profile-heading">Профиль Пульса</p></div><div class="overview-tools"><div class="live-status" role="status"><i class="dot loading" id="source-dot" aria-hidden="true"></i><span id="source-status">Подключение</span></div></div></div>
+          <div class="page-head"><div><h1>Обзор</h1><p class="subtle" id="profile-heading">Профиль Пульса</p></div></div>
           <div class="cards">
             <div class="card"><span class="card-label">Покупки автора · 24 ч</span><strong id="source-buys">0</strong><small>Опубликованные сделки</small></div>
             <div class="card"><span class="card-label">Продажи автора · 24 ч</span><strong id="source-sells">0</strong><small>Опубликованные сделки</small></div>
@@ -484,6 +484,16 @@
       for(const key of state.asset_consents||[]){let values;try{values=JSON.parse(key);}catch(_){continue;}const line=document.createElement('div');line.className='source-line';const label=document.createElement('span');label.textContent=values[2]+' · '+values[3]+' · счёт '+values[1]+' · '+values[0];line.append(label);const button=document.createElement('button');button.type='button';button.className='button neutral small';button.textContent='Снять разрешение';button.addEventListener('click',async()=>{button.disabled=true;try{await api('/api/asset/forget',{key});await refresh();}catch(error){alert(error.message);}finally{button.disabled=false;}});line.append(button);consents.append(line);}
       if(!consents.children.length)consents.textContent='Разрешений без подтверждения нет';
     }
+    function pulseDisplayStatus(state){
+      const m=state.monitor,a=state.auth;
+      const stages={authorization:'Проверяем авторизацию Пульса',instruments:'Загружаем автора',portfolio:'Проверяем портфель автора',history:'Загружаем сделки'};
+      if(m.status==='error')return {label:'Ошибка Пульса · смотри журнал',detail:(stages[m.phase]||'Обновление Пульса')+': '+m.message, error:true};
+      if(m.status==='scheduled')return {label:'Ожидание расписания · МСК',detail:m.message};
+      if(m.status==='checking'||['checking','opening','waiting'].includes(a.status))return {label:(m.phase==='history'&&m.progress?m.progress:stages[m.phase])||'Проверяем авторизацию Пульса',detail:m.progress||a.message,loading:true};
+      if(a.status!=='authenticated')return {label:'Требуется вход в Пульс',detail:a.message,error:true};
+      if(m.warning)return {label:'Данные загружены частично · смотри журнал',detail:m.warning,warning:true};
+      return {label:state.settings.monitoring_enabled?'Мониторинг включён':'Данные Пульса загружены',detail:m.message||a.message};
+    }
     function renderEvents(){
       const box=el('events');box.replaceChildren();el('event-count').textContent=events.length+' событий';
       if(!events.length){box.className='empty';box.textContent='Событий пока нет';return;}box.className='table-wrap';
@@ -553,11 +563,12 @@
       el('auto-copy-button').className=autoCopyEnabled?'button neutral small':'button small';
       el('auto-copy-button').hidden=realMode!=='off';
       el('copy-note').textContent=realMode==='auto'?'Новые сделки проверяются по лимитам и отправляются брокеру лимитными заявками. Для прошлых покупок подготовь заявку кнопкой в строке.':realMode==='confirm'?'Новые сделки ожидают подтверждения в журнале. Для прошлых покупок подготовь заявку кнопкой в строке.':autoCopyEnabled?'Новые покупки и продажи повторяются условно по лимитам. Кнопки в строках позволяют обработать ранее опубликованные покупки за 24 часа. Реальных заявок нет.':'Кнопки в строках условно повторяют покупки за 24 часа. Автокопирование новых сделок выключено. Реальных заявок нет.';
-      const sourceLoading=sharedSource&&state.monitor.status!=='scheduled'&&(state.auth.status!=='authenticated'||['error','checking'].includes(state.monitor.status));
-      el('source-status').textContent=sourceLoading?'Загружаем данные профиля из Пульса':state.monitor.status==='scheduled'?'Ожидание расписания · МСК':state.monitor.status==='error'?'Ошибка чтения Пульса':state.monitor.status==='checking'?'Проверяем данные Пульса':state.auth.status!=='authenticated'?'Пульс не подключён':state.settings.monitoring_enabled?'Мониторинг включён':'Мониторинг выключен';
-      el('source-dot').className='dot'+(sourceLoading?' loading':state.auth.status!=='authenticated'||state.monitor.status==='error'?' bad':state.monitor.status==='running'?' good':'');
+      const pulse=pulseDisplayStatus(state);
+      el('source-status').textContent=pulse.label;
+      el('source-status').title=pulse.detail;
+      el('source-dot').className='dot'+(pulse.loading?' loading':pulse.error?' bad':pulse.warning?'':state.auth.status==='authenticated'?' good':'');
       el('last-check').textContent=state.monitor.last_check?fmtDate(state.monitor.last_check):'—';
-      el('source-message').textContent=sourceLoading?(state.monitor.progress||'Загружаем данные профиля из Пульса'):state.auth.status==='authenticated'||['error','checking','scheduled'].includes(state.monitor.status)?state.monitor.message:state.auth.message;el('instrument-total').textContent=instruments.length;
+      el('source-message').textContent=pulse.detail;el('instrument-total').textContent=instruments.length;
       const buys=today.filter(item=>item.action==='buy').length,sells=today.filter(item=>item.action==='sell').length;
       const demos=events.filter(item=>item.trade==='ДЕМО: куплено'||item.trade==='ДЕМО: продано');
       el('source-buys').textContent=buys;el('source-sells').textContent=sells;el('our-buys').textContent=demos.filter(item=>item.side==='buy').length;el('demo-total').textContent=demos.length;

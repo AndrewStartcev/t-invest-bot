@@ -1,0 +1,14 @@
+const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
+const html=fs.readFileSync('demo/index.html','utf8');
+const fn=html.slice(html.indexOf('    function pulseDisplayStatus('),html.indexOf('    function renderEvents()'));
+const context={};vm.createContext(context);vm.runInContext(fn,context);
+const state={monitor:{status:'checking',phase:'history',progress:'Загружаем сделки: 2 из 7 · TEST'},auth:{status:'authenticated'},settings:{monitoring_enabled:true}};
+assert.equal(context.pulseDisplayStatus(state).loading,true);
+assert.equal(context.pulseDisplayStatus(state).detail,state.monitor.progress);
+state.monitor={status:'error',phase:'portfolio',message:'Источник недоступен'};
+const failure=context.pulseDisplayStatus(state);assert.equal(failure.error,true);assert.ok(!failure.loading);assert.match(failure.detail,/Источник недоступен/);
+state.monitor={status:'running',warning:'История недоступна'};
+assert.equal(context.pulseDisplayStatus(state).warning,true);assert.ok(!context.pulseDisplayStatus(state).loading);
+assert.equal((html.match(/id="source-status"/g)||[]).length,1);
+assert.ok(html.indexOf('id="source-status"')<html.indexOf('id="view-overview"'));
+console.log('Pulse progress checks passed');
