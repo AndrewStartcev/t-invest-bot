@@ -312,10 +312,10 @@
       document.body.style.overflow = showDialog ? 'hidden' : '';
       el('connect-pulse').hidden = sharedSource || ready;
       el('open-pulse').hidden = sharedSource || ready;
-      el('auth-summary').textContent = sharedSource ? (ready ? 'Источник подключён' : 'Источник недоступен') : ready ? 'Авторизован' : auth.status === 'waiting' ? 'Ожидаем входа' : auth.status === 'checking' || auth.status === 'opening' ? 'Проверяем' : 'Нужен вход';
-      el('auth-message').textContent = auth.message || 'Ожидаем входа';
+      el('auth-summary').textContent = sharedSource ? (ready ? 'Источник подключён' : 'Загружаем данные профиля из Пульса') : ready ? 'Авторизован' : auth.status === 'waiting' ? 'Ожидаем входа' : auth.status === 'checking' || auth.status === 'opening' ? 'Проверяем' : 'Нужен вход';
+      el('auth-message').textContent = sharedSource && !ready ? 'Загружаем данные профиля из Пульса' : auth.message || 'Ожидаем входа';
       if (popupBlocked && !ready) el('auth-message').textContent += ' Разреши всплывающее окно или нажми «Открыть серверный браузер».';
-      el('auth-dot').className = 'dot' + (ready ? ' good' : auth.status === 'required' ? ' bad' : '');
+      el('auth-dot').className = 'dot' + (ready ? ' good' : !sharedSource && auth.status === 'required' ? ' bad' : '');
       el('auth-button').textContent = auth.status === 'waiting' ? 'Показать окно Пульса' : auth.status === 'opening' ? 'Открываем окно…' : auth.status === 'checking' ? 'Восстанавливаем сеанс…' : 'Войти в Т-Банк';
       el('auth-button').disabled = auth.status === 'opening' || auth.status === 'checking';
       el('auth-show').hidden = true;
@@ -550,10 +550,11 @@
       el('auto-copy-button').className=autoCopyEnabled?'button neutral small':'button small';
       el('auto-copy-button').hidden=realMode!=='off';
       el('copy-note').textContent=realMode==='auto'?'Новые сделки проверяются по лимитам и отправляются брокеру лимитными заявками. Для прошлых покупок подготовь заявку кнопкой в строке.':realMode==='confirm'?'Новые сделки ожидают подтверждения в журнале. Для прошлых покупок подготовь заявку кнопкой в строке.':autoCopyEnabled?'Новые покупки и продажи повторяются условно по лимитам. Кнопки в строках позволяют обработать ранее опубликованные покупки за 24 часа. Реальных заявок нет.':'Кнопки в строках условно повторяют покупки за 24 часа. Автокопирование новых сделок выключено. Реальных заявок нет.';
-      el('source-status').textContent=state.monitor.status==='scheduled'?'Ожидание расписания · МСК':state.monitor.status==='error'?'Ошибка чтения Пульса':state.monitor.status==='checking'?'Проверяем данные Пульса':state.auth.status!=='authenticated'?'Пульс не подключён':state.settings.monitoring_enabled?'Мониторинг включён':'Мониторинг выключен';
-      el('source-dot').className='dot'+(state.auth.status!=='authenticated'||state.monitor.status==='error'?' bad':state.monitor.status==='running'?' good':'');
+      const sourceLoading=sharedSource&&state.monitor.status!=='scheduled'&&(state.auth.status!=='authenticated'||['error','checking'].includes(state.monitor.status));
+      el('source-status').textContent=sourceLoading?'Загружаем данные профиля из Пульса':state.monitor.status==='scheduled'?'Ожидание расписания · МСК':state.monitor.status==='error'?'Ошибка чтения Пульса':state.monitor.status==='checking'?'Проверяем данные Пульса':state.auth.status!=='authenticated'?'Пульс не подключён':state.settings.monitoring_enabled?'Мониторинг включён':'Мониторинг выключен';
+      el('source-dot').className='dot'+(sourceLoading?'':state.auth.status!=='authenticated'||state.monitor.status==='error'?' bad':state.monitor.status==='running'?' good':'');
       el('last-check').textContent=state.monitor.last_check?fmtDate(state.monitor.last_check):'—';
-      el('source-message').textContent=state.auth.status==='authenticated'||['error','checking','scheduled'].includes(state.monitor.status)?state.monitor.message:state.auth.message;el('instrument-total').textContent=instruments.length;
+      el('source-message').textContent=sourceLoading?'Загружаем данные профиля из Пульса':state.auth.status==='authenticated'||['error','checking','scheduled'].includes(state.monitor.status)?state.monitor.message:state.auth.message;el('instrument-total').textContent=instruments.length;
       const buys=today.filter(item=>item.action==='buy').length,sells=today.filter(item=>item.action==='sell').length;
       const demos=events.filter(item=>item.trade==='ДЕМО: куплено'||item.trade==='ДЕМО: продано');
       el('source-buys').textContent=buys;el('source-sells').textContent=sells;el('our-buys').textContent=demos.filter(item=>item.side==='buy').length;el('demo-total').textContent=demos.length;
