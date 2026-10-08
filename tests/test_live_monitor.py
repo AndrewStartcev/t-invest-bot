@@ -33,6 +33,38 @@ class FakeBrowser:
 
 
 class LiveMonitorTests(unittest.TestCase):
+    def test_verified_instruments_are_visible_before_recent_history_finishes(self):
+        browser = FakeBrowser()
+        def slow_history(*args, **kwargs):
+            self.assertEqual(demo_admin.AUTH["status"], "authenticated")
+            self.assertEqual(demo_admin.MONITOR["instrument_count"], 1)
+            self.assertEqual(demo_admin.MONITOR["instruments"][0]["ticker"], "DEMO")
+            self.assertEqual(demo_admin.MONITOR["phase"], "history")
+            raise PulseError("История временно недоступна")
+        with tempfile.TemporaryDirectory() as root, \
+                patch.object(demo_admin, "STATE_PATH", Path(root) / "state.json"), \
+                patch.object(demo_admin, "AUTH", {}), patch.object(demo_admin, "MONITOR", {}), \
+                patch.object(demo_admin, "TODAY", []), patch.object(demo_admin, "INVESTOR_PORTFOLIO", {}), \
+                patch.object(demo_admin, "recent_profile_trades", side_effect=slow_history):
+            demo_admin.poll_once(browser, demo_admin.DEFAULTS, emit_events=False)
+            self.assertEqual(demo_admin.MONITOR["status"], "running")
+            self.assertIn("история", demo_admin.MONITOR["message"])
+
+    def test_recent_history_budget_keeps_completed_pages(self):
+        from unittest.mock import MagicMock
+        now = datetime.now(timezone.utc)
+        item = {"ticker": "DEMO", "classCode": "TQBR", "showName": "Тест", "type": "stock",
+                "maxTradeDateTime": now.isoformat()}
+        browser = MagicMock()
+        browser.history.return_value = {"items": [{"tradeDateTime": now.isoformat(), "action": "buy",
+                                                    "averagePrice": 100, "currency": "rub"}],
+                                        "hasNext": True, "nextCursor": "next"}
+        with patch.object(demo_admin.time, "monotonic", side_effect=[0, 0, 31]):
+            with self.assertRaises(PulseError) as failure:
+                demo_admin.recent_profile_trades(browser, "LinMath", [item], cutoff=now-timedelta(days=1))
+        self.assertEqual(len(failure.exception.partial_trades), 1)
+        browser.history.assert_called_once()
+
     def test_portfolio_snapshots_survive_restart_and_are_compared_before_signals(self):
         from investor_portfolio import parse_screen
         profile = canonical_profile_url(demo_admin.DEFAULTS["profile_url"])

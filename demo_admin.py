@@ -724,14 +724,20 @@ def next_history_cursor(page: dict, seen_cursors: set, ticker: str) -> str | int
 
 
 def recent_profile_trades(browser: PulseBrowser, profile: str, instruments: list[dict], *,
-                          cutoff: datetime | None = None, max_pages: int = 100) -> list[dict]:
+                          cutoff: datetime | None = None, max_pages: int = 100,
+                          budget_seconds: float = 30) -> list[dict]:
     cutoff = cutoff or datetime.now(timezone.utc) - timedelta(days=1)
+    deadline = time.monotonic() + budget_seconds
     found = []
     for item in month_targets(instruments, cutoff):
         cursor = None
         seen_cursors = set()
         occurrences = {}
         for _ in range(max_pages):
+            if time.monotonic() >= deadline:
+                error = PulseError("История за 24 часа загружена частично; повторим проверку")
+                error.partial_trades = sorted(found, key=lambda trade: trade["tradeDateTime"], reverse=True)
+                raise error
             page = browser.history(item["ticker"], item["classCode"], cursor)
             older = append_history_page(found, page, item, profile, cutoff, occurrences)
             if older or not page.get("hasNext"):
@@ -806,6 +812,8 @@ def advance_month_scan(browser: PulseBrowser, scan: dict, batch_size: int = 1) -
 
 def poll_once(browser: PulseBrowser, settings: dict, *, emit_events: bool = True) -> None:
     settings = {**DEFAULTS, **settings}
+    with LOCK:
+        MONITOR.update(status="checking", phase="instruments", progress="Читаем список инструментов автора")
     state = json.loads(STATE_PATH.read_text(encoding="utf-8")) if STATE_PATH.exists() else {}
     previous_portfolios = state.get("_portfolios", {})
     if not isinstance(previous_portfolios, dict):
@@ -813,6 +821,14 @@ def poll_once(browser: PulseBrowser, settings: dict, *, emit_events: bool = True
     profile, _ = operations_url(settings["profile_url"])
     previous = state.get(profile, {})
     profile, instruments = browser.snapshot(settings["profile_url"], previous)
+    # A verified snapshot is immediately useful; optional portfolio/history reads
+    # must not keep the entire cabinet empty or postpone confirmation of access.
+    with LOCK:
+        AUTH.update(status="authenticated", message="Вход в Пульс подтверждён")
+        MONITOR.update(status="checking", profile=profile, instrument_count=len(instruments),
+                       instruments=[{key: item.get(key) for key in ("ticker", "classCode", "showName", "type", "totalOperationsCount", "maxTradeDateTime")} for item in instruments],
+                       last_check=datetime.now(timezone.utc).isoformat(), phase="portfolio",
+                       progress="Список инструментов получен; проверяем портфель автора")
     portfolio = portfolio_unavailable(settings["profile_url"], "Проверка портфеля автора выключена")
     if settings["policy"]["enabled"]:
         try:
@@ -858,16 +874,19 @@ def poll_once(browser: PulseBrowser, settings: dict, *, emit_events: bool = True
     state["_portfolios"] = {**previous_portfolios, canonical_profile_url(settings["profile_url"]): portfolio}
     # Commit the watermark before side effects: a retry cannot create a second demo purchase.
     write_state(STATE_PATH, state)
+    with LOCK:
+        MONITOR.update(phase="history", progress="Список инструментов получен; загружаем сделки за 24 часа")
     try:
         recent = recent_profile_trades(browser, profile, instruments)
         recent_message = "Данные Пульса получены"
-    except Exception:
-        recent = []
-        recent_message = "Список получен; история за 24 часа временно недоступна"
+    except Exception as error:
+        recent = getattr(error, "partial_trades", [])
+        recent_message = ("Список получен; история за 24 часа загружена частично" if recent
+                          else "Список получен; история за 24 часа временно недоступна")
     if session_warning:
         recent_message += "; браузерную сессию не удалось сохранить"
     with LOCK:
-        MONITOR.update(status="running", message=recent_message, last_check=datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds"), profile=profile, instrument_count=len(instruments),
+        MONITOR.update(status="running", phase="ready", progress=recent_message, message=recent_message, last_check=datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds"), profile=profile, instrument_count=len(instruments),
                        instruments=[{key: item.get(key) for key in ("ticker", "classCode", "showName", "type", "totalOperationsCount", "maxTradeDateTime")} for item in instruments])
         TODAY[:] = recent
         AUTH.update(status="authenticated", message="Вход в Пульс подтверждён")
@@ -1312,9 +1331,12 @@ def remote_monitor_loop() -> None:
                     MONITOR.update(status="stopped", message="Уведомления выключены; данные профиля обновлены")
             except Exception as error:
                 message = str(error) if isinstance(error, PulseError) else "Ошибка чтения общего источника"
+                print("Пульс: обновление кабинета прервано на этапе " + MONITOR.get("phase", "подключение")
+                      + " (" + type(error).__name__ + "): " + message.replace("\n", " ")[:240], flush=True)
                 with LOCK:
                     AUTH.update(status="required", message=message)
-                    MONITOR.update(status="error", message=message)
+                    MONITOR.update(status="error", message=message, phase="retry",
+                                   progress="Ожидаем данные общего источника; проверка повторится автоматически")
             next_poll = time.monotonic() + settings["poll_seconds"]
             if not schedule_open(settings):
                 next_poll = time.monotonic() + 0.5

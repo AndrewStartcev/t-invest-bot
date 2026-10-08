@@ -557,7 +557,7 @@
       el('source-status').textContent=sourceLoading?'Загружаем данные профиля из Пульса':state.monitor.status==='scheduled'?'Ожидание расписания · МСК':state.monitor.status==='error'?'Ошибка чтения Пульса':state.monitor.status==='checking'?'Проверяем данные Пульса':state.auth.status!=='authenticated'?'Пульс не подключён':state.settings.monitoring_enabled?'Мониторинг включён':'Мониторинг выключен';
       el('source-dot').className='dot'+(sourceLoading?' loading':state.auth.status!=='authenticated'||state.monitor.status==='error'?' bad':state.monitor.status==='running'?' good':'');
       el('last-check').textContent=state.monitor.last_check?fmtDate(state.monitor.last_check):'—';
-      el('source-message').textContent=sourceLoading?'Загружаем данные профиля из Пульса':state.auth.status==='authenticated'||['error','checking','scheduled'].includes(state.monitor.status)?state.monitor.message:state.auth.message;el('instrument-total').textContent=instruments.length;
+      el('source-message').textContent=sourceLoading?(state.monitor.progress||'Загружаем данные профиля из Пульса'):state.auth.status==='authenticated'||['error','checking','scheduled'].includes(state.monitor.status)?state.monitor.message:state.auth.message;el('instrument-total').textContent=instruments.length;
       const buys=today.filter(item=>item.action==='buy').length,sells=today.filter(item=>item.action==='sell').length;
       const demos=events.filter(item=>item.trade==='ДЕМО: куплено'||item.trade==='ДЕМО: продано');
       el('source-buys').textContent=buys;el('source-sells').textContent=sells;el('our-buys').textContent=demos.filter(item=>item.side==='buy').length;el('demo-total').textContent=demos.length;
