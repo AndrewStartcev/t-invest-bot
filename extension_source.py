@@ -108,6 +108,16 @@ class ExtensionStore:
                 result["last_status"] = "unavailable"
         return result
 
+    def public_snapshot(self, expected_profile):
+        profile = canonical_profile_url(expected_profile)
+        with self.lock:
+            current = self._read()
+        if current.get("profile_url") != profile:
+            return {"last_status": "never", "instruments": [], "recent": [],
+                    "total_events": 0, "active": False}
+        return {**self.public_status(), "instruments": current.get("instruments", []),
+                "recent": current.get("recent", [])}
+
     def accept(self, report, expected_profile, emit=None, alert=None):
         """Validate complete deltas, atomically commit watermarks, then notify.
 
