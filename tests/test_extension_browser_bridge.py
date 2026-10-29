@@ -84,6 +84,40 @@ class BrowserBridgeTests(unittest.TestCase):
                 server.server_close()
                 thread.join(timeout=3)
 
+    def test_server_storage_failure_is_safe_and_diagnostic(self):
+        """Unhandled persistence failures must return JSON and a log ID."""
+        with patch.object(demo_admin, "EXTENSION_SOURCE", self.auth), \
+             patch.object(demo_admin, "EXTENSION_TRADES", self.trades), \
+             patch.object(demo_admin, "load_settings",
+                          return_value={**demo_admin.DEFAULTS, "profile_url": PROFILE}), \
+             patch.dict(os.environ, {"TINVEST_BACKEND_KEY": "", "TINVEST_MULTIUSER": "0"}):
+            server = ThreadingHTTPServer(("127.0.0.1", 0), demo_admin.Handler)
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                base = f"http://127.0.0.1:{server.server_port}/api/extension/report"
+                def post(payload):
+                    return Request(base, data=json.dumps(payload).encode(),
+                                   headers={"Content-Type": "application/json",
+                                            "X-TInvest-Extension-Key": self.key})
+                with patch.object(self.trades, "accept", side_effect=OSError("Disk write failed")):
+                    with self.assertRaises(HTTPError) as failed:
+                        urlopen(post({"kind":"trades", "status":"ok",
+                                      "profile_url":PROFILE, "instruments":[], "events":[]}), timeout=5)
+                    self.assertEqual(503, failed.exception.code)
+                    self.assertEqual("application/json; charset=utf-8",
+                                     failed.exception.headers["Content-Type"])
+                    error = json.load(failed.exception)["error"]
+                    self.assertIn("Код диагностики:", error)
+                    self.assertNotIn("Disk write failed", error)
+                with self.assertRaises(HTTPError) as malformed:
+                    urlopen(post([]), timeout=5)
+                self.assertEqual(422, malformed.exception.code)
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=3)
+
     def test_new_author_starts_a_new_baseline(self):
         self.trades.accept({"status":"ok","profile_url":PROFILE,
                             "instruments":[{"ticker":"T1","classCode":"TQBR",
