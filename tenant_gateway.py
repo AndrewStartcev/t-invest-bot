@@ -234,6 +234,8 @@ class Gateway(BaseHTTPRequestHandler):
                 self.send_header("Content-Length", str(len(output)))
                 if response.getheader("Location"):
                     self.send_header("Location", response.getheader("Location"))
+                if response.getheader("Content-Disposition") and self.path == "/api/extension/download.zip":
+                    self.send_header("Content-Disposition", response.getheader("Content-Disposition"))
                 self.end_headers()
                 self.wfile.write(output)
             finally:
