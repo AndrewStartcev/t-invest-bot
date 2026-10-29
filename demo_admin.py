@@ -1759,6 +1759,8 @@ class Handler(BaseHTTPRequestHandler):
                 if not 0 < length <= 2 * 1024 * 1024:
                     raise ValueError("Некорректный размер отчёта")
                 report = json.loads(self.rfile.read(length))
+                if not isinstance(report, dict):
+                    raise ValueError("Отчёт расширения должен быть объектом")
                 if report == {"kind": "config"}:
                     current = EXTENSION_TRADES.accept({"status":"test"}, load_settings()["profile_url"])
                     self.respond(200, current)
@@ -1778,6 +1780,16 @@ class Handler(BaseHTTPRequestHandler):
                 self.respond(200, result)
             except (ValueError, TypeError, PulseError) as error:
                 self.respond(422, {"error": str(error)[:240]})
+            except Exception as error:
+                # This endpoint must not silently crash a worker on disk IO,
+                # failed downstream notification or an unexpected data shape.
+                # Never log the submitted bank data or pairing key.
+                diagnostic = uuid.uuid4().hex[:12]
+                print(f"pulse-extension-report error_id={diagnostic} "
+                      f"exception={type(error).__name__} message={str(error)[:180]}",
+                      flush=True)
+                self.respond(503, {"error": "Сервер не смог сохранить отчёт Пульса. "
+                                         "Код диагностики: " + diagnostic})
             return
         # Legacy browser actions are unavailable in extension-source mode.
         # They must never create a Playwright session or an unprocessed queue.
