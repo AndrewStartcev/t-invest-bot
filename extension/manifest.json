@@ -1,13 +1,12 @@
 {
   "manifest_version": 3,
-  "name": "T-Invest Pulse Monitor (read-only)",
-  "version": "0.1.0",
-  "description": "Чтение опубликованных сделок Пульса в авторизованном браузере без передачи банковских cookie серверу.",
+  "name": "T-Invest Pulse Auth Watchdog",
+  "version": "0.2.0",
+  "description": "Контроль авторизации Пульса каждые две минуты. Без сбора сделок или банковских данных.",
   "minimum_chrome_version": "120",
   "permissions": [
     "storage",
-    "tabs",
-    "webRequest"
+    "tabs"
   ],
   "host_permissions": [
     "https://*.tbank.ru/*",
@@ -32,7 +31,7 @@
     }
   ],
   "action": {
-    "default_title": "T-Invest Pulse Monitor",
+    "default_title": "Пульс · Контроль авторизации",
     "default_popup": "popup.html"
   }
 }
