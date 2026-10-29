@@ -49,5 +49,12 @@ el("open").addEventListener("click",async()=>{
   el("enabled").checked=Boolean(cfg.enabled);
   if(cfg.last_error)status("Последняя ошибка: "+cfg.last_error,true);
   else if(cfg.last_sent_at)status("Последняя проверка: "+cfg.last_status+" · "+new Date(cfg.last_sent_at).toLocaleString("ru-RU"));
-  if(cfg.key?.length>=32)try{await checkConnection();}catch{}
+  if(cfg.key?.length>=32) {
+    try {
+      await checkConnection();
+      status("✅ Кабинет подключён. Контроль авторизации каждые 2 минуты.");
+    } catch(error) {
+      status("Нет связи с админкой: " + error.message,true);
+    }
+  }
 })().catch(e=>status(e.message,true));
