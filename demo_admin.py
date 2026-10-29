@@ -1827,6 +1827,10 @@ class Handler(BaseHTTPRequestHandler):
                 self.respond(403, {"error": "Доступ только владельцу источника"})
                 return
             if self.path in owner_routes:
+                expected_origin = public_origin() or f"http://127.0.0.1:{self.server.server_port}"
+                if self.headers.get("Origin") not in (None, expected_origin):
+                    self.respond(403, {"error": "Запрос из другого источника отклонён"})
+                    return
                 self.respond(409, {"error": "Серверный Пульс отключён; используйте расширение Brave."})
                 return
             if self.path not in owner_routes:
