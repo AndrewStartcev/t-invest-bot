@@ -10,7 +10,7 @@ from pulse_live import canonical_profile_url, PulseError
 
 
 def fingerprint(settings):
-    keys = ("profile_url", "real_mode", "extension_live_enabled", "monitoring_enabled", "auto_demo_buy", "rules", "policy", "schedule")
+    keys = ("profile_url", "real_mode", "monitoring_enabled", "auto_demo_buy", "rules", "policy", "schedule")
     return hashlib.sha256(json.dumps({key: settings.get(key) for key in keys}, sort_keys=True).encode()).hexdigest()
 
 
