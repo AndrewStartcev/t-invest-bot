@@ -10,6 +10,7 @@
   const MAX_DELTA = 100;
   let instrumentUrl = null, nicknameUrl = null, busy = false, lastProfileCheck = 0, lastIdentityCheck = 0, previousStart = 0;
   let consecutiveFailures = 0;
+  let safeHeaders = {};
   const mountedAt = Date.now();
 
   function selectedNickname(urlString) {
@@ -50,7 +51,8 @@
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
       const response = await fetch(target.href, {
-        credentials: "include", cache: "no-store", signal: controller.signal
+        credentials: "include", cache: "no-store", signal: controller.signal,
+        headers: safeHeaders
       });
       if (!response.ok) {
         const error = Error("API Пульса: HTTP " + response.status);
@@ -131,7 +133,7 @@
     const timer = setTimeout(() => controller.abort(),9000);
     try {
       const response = await fetch(nickname.href, {
-        credentials:"include",cache:"no-store",signal:controller.signal
+        credentials:"include",cache:"no-store",signal:controller.signal,headers:safeHeaders
       });
       if (!response.ok) {
         const error = Error("Автор Пульса: HTTP " + response.status);
@@ -173,6 +175,7 @@
         const result = await request({kind:"get_instrument_url"});
         instrumentUrl = result.url;
         nicknameUrl = result.nickname_url;
+        safeHeaders = result.headers || {};
       }
       if (!instrumentUrl || !nicknameUrl) {
         if (Date.now()-mountedAt > 20000)
@@ -231,6 +234,10 @@
   }
 
   chrome.runtime.onMessage.addListener(message => {
+    if (message?.kind === "safe_headers") {
+      safeHeaders = Object.fromEntries(Object.entries(message.headers || {}).filter(
+        ([key]) => ["x-app-name","x-app-version","x-platform"].includes(key.toLowerCase())));
+    }
     if (message?.kind === "instrument_url") {
       try {
         const parsed = new URL(message.url);
