@@ -23,6 +23,7 @@ from broker_read import BrokerError, account_snapshot, read_only_accounts
 from broker_trade import TradeError, full_access_accounts, order_state, prepare_order, submit_order
 from telegram_notify import NotificationError, send_notification
 from pulse_auth_monitor import PulseAuthStore
+from extension_source import ExtensionStore
 from extension_archive import ZIP_NAME, extension_zip
 from server_config import public_origin, server_mode, shared_source, source_key, validate_source_config
 from pulse_live import PulseBrowser, PulseError, canonical_profile_url, operations_url
@@ -39,6 +40,7 @@ from short_simulation import simulate_with_short
 ROOT = Path(__file__).resolve().parent
 DATA_DIR = Path(os.environ.get("TINVEST_DATA_DIR", str(ROOT / ".local"))).expanduser().resolve()
 EXTENSION_SOURCE = PulseAuthStore(DATA_DIR)
+EXTENSION_TRADES = ExtensionStore(DATA_DIR)
 SETTINGS_PATH = DATA_DIR / "demo-settings.json"
 STATE_PATH = DATA_DIR / "pulse-live-state.json"
 EVENTS_PATH = DATA_DIR / "events.json"
@@ -436,6 +438,74 @@ def extension_alert(kind, message):
              "reason": message, "severity": "error" if kind == "incident" else "info"}
     notify(event, settings, message, urgent=True)
     add_event(event)
+
+
+def extension_record_trade(trade):
+    """Record browser-supplied *observations*, never run trading decisions."""
+    settings = load_settings()
+    event = {"time": datetime.now(timezone.utc).isoformat(), "source": "extension_trade",
+             "profile": settings["profile_url"], "instrument": trade["ticker"],
+             "ticker": trade["ticker"], "classCode": trade["classCode"],
+             "action": trade["action"], "side": trade["action"],
+             "price": trade["averagePrice"], "tradeDateTime": trade["tradeDateTime"],
+             "trade": "Расширение: " + ("покупка" if trade["action"] == "buy" else "продажа"),
+             "reason": "Данные из браузера клиента; только наблюдение, без заявки"}
+    if settings.get("monitoring_enabled"):
+        notify(event, settings, "Пульс · " + trade["ticker"] + " · " + event["trade"] +
+              " · " + str(trade["averagePrice"]) + ". Только наблюдение.")
+    add_event(event)
+
+
+def extension_dashboard():
+    """The dashboard uses extension reports, not the obsolete Playwright state."""
+    settings = load_settings()
+    snapshot = EXTENSION_TRADES.public_snapshot(settings["profile_url"])
+    status = snapshot.get("last_status", "never")
+    instruments = snapshot.get("instruments") or []
+    nickname, _ = operations_url(settings["profile_url"])
+    latest = snapshot.get("last_report")
+    connected = status == "ok" and bool(snapshot.get("active"))
+    error = snapshot.get("last_error") or ""
+    if connected:
+        message = "Данные получены из расширения Brave · " + str(len(instruments)) + " инструментов"
+    elif status == "offline":
+        message = "Нет новых отчётов от расширения. Открой Brave и вкладку Сделки."
+    else:
+        message = "Ждём первый полный снимок из расширения Brave. Серверный браузер не используется."
+    display = []
+    names = {item["ticker"] + ":" + item["classCode"]: item.get("showName") or item["ticker"]
+             for item in instruments}
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+    for index, trade in enumerate(snapshot.get("recent", [])):
+        try:
+            when = datetime.fromisoformat(trade["tradeDateTime"])
+            if when.tzinfo is None or when < cutoff:
+                continue
+            display.append({"id": "extension:" + str(index), "name": names.get(
+                            trade["ticker"] + ":" + trade["classCode"], trade["ticker"]),
+                            "ticker": trade["ticker"], "classCode": trade["classCode"],
+                            "tradeDateTime": trade["tradeDateTime"], "action": trade["action"],
+                            "price": trade["averagePrice"], "currency": "",
+                            "can_demo_buy": False})
+        except (ValueError, TypeError, KeyError):
+            continue
+    return {"auth": {"status": "authenticated" if connected else "required", "message": message},
+            "monitor": {"status": "running" if connected else "waiting", "message": message,
+                        "phase": "extension", "profile": nickname, "last_check": latest,
+                        "instrument_count": len(instruments), "instruments": instruments},
+            "today": sorted(display, key=lambda item: item["tradeDateTime"], reverse=True),
+            "month": {"status": "idle", "items": [], "processed": 0, "total": 0,
+                      "message": "Через расширение пока передаются новые операции", "loaded_at": None}}
+
+
+def extension_watchdog_loop():
+    """Only Telegram/offline supervision; never open a bank browser."""
+    while True:
+        try:
+            EXTENSION_SOURCE.tick(alert=extension_alert)
+        except (OSError, ValueError) as error:
+            print("Пульс: ошибка проверки состояния расширения: " + type(error).__name__, flush=True)
+        time.sleep(5)
 
 
 def queue_approval(event, signal, settings, source_key, reasons):
