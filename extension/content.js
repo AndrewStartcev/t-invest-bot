@@ -308,6 +308,7 @@
         monthCursor = page.nextCursor;
       }
       monthRetryAt.delete(key);
+      await chrome.storage.local.set({month_history_error:""});
     }catch(error){
       // Never mark partial month history complete, or advance live counters.
       monthRetryAt.set(key,Date.now()+60000);
