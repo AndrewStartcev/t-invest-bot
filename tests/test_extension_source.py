@@ -59,6 +59,33 @@ class ExtensionSourceTests(unittest.TestCase):
         self.source.accept(sample(7), PROFILE, alert=lambda *x: messages.append(x))
         self.assertEqual("recovered", messages[-1][0])
 
+    def test_disconnected_tab_alerts_once_then_recovers(self):
+        import json
+        from datetime import datetime, timedelta, timezone
+        warnings = []
+        alert = lambda *msg: warnings.append(msg)
+        self.source.accept(sample(4), PROFILE, alert=alert)
+        data = json.loads(self.source.path.read_text(encoding="utf-8"))
+        data["last_report"] = (datetime.now(timezone.utc) - timedelta(seconds=40)).isoformat()
+        self.source._save(data)
+        self.assertTrue(self.source.tick(alert=alert))
+        self.assertFalse(self.source.tick(alert=alert))
+        self.assertEqual(1, len(warnings))
+        self.source.accept(sample(4), PROFILE, alert=alert)
+        self.assertEqual("recovered", warnings[-1][0])
+
+    def test_intentional_stop_has_no_offline_alert(self):
+        import json
+        from datetime import datetime, timedelta, timezone
+        notifications = []
+        self.source.accept(sample(4), PROFILE)
+        self.source.accept({"profile_url": PROFILE, "status": "stopped"}, PROFILE)
+        data = json.loads(self.source.path.read_text(encoding="utf-8"))
+        data["last_report"] = (datetime.now(timezone.utc) - timedelta(seconds=50)).isoformat()
+        self.source._save(data)
+        self.assertFalse(self.source.tick(alert=lambda *v: notifications.append(v)))
+        self.assertEqual([], notifications)
+
     def test_wrong_profile_and_forged_events(self):
         with self.assertRaises(ValueError):
             self.source.accept(sample(5), PROFILE.replace("LinMath", "Other"))
