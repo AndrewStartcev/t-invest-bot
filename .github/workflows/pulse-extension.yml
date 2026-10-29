@@ -16,6 +16,8 @@ jobs:
         run: python -m compileall -q demo_admin.py tenant_gateway.py extension_source.py scripts/render_nginx.py
       - name: Run read-only source tests
         run: python -m unittest discover -s tests -p 'test_extension_source.py' -v
+      - name: Existing Python regression suite
+        run: python -m unittest discover -s tests -p 'test_*.py' -v
       - name: Check nginx template render
         run: python scripts/render_nginx.py invest.argokov.ru --https --multi-user > /tmp/t-invest-test.conf
   extension:
