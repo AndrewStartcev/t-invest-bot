@@ -197,7 +197,10 @@
       const list = await instruments();
       const baselines = cfg.baselines || {};
       const profileId = new URL(instrumentUrl).pathname.match(/\/profile\/([^/]+)\/instrument/)[1];
-      const saved = selected.reset_baseline ? {} : (baselines[profileId] || {});
+      // Trust the server's acknowledged watermark, never an old browser
+      // snapshot from a different author or an interrupted previous run.
+      const saved = selected.reset_baseline ? {} :
+        (selected.counts && Object.keys(selected.counts).length ? selected.counts : (baselines[profileId] || {}));
       const next = {...saved};
       let totalDelta = 0;
       const changed = [];
