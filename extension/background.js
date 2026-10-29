@@ -8,6 +8,22 @@ const PULSE_HOSTS = new Set(["www.tbank.ru", "tbank.ru", "www.tbank-online.com",
 const observed = new Map();
 const nicknames = new Map();
 const safeHeaders = new Map();
+let profileCache = null;
+let profileCachedUntil = 0;
+
+async function adminProfile(force = false) {
+  // One paired handshake supplies the currently selected author for all tabs.
+  // Keep a short cache to avoid hitting the backend on every 3-5s cycle.
+  if (!force && profileCache && Date.now() < profileCachedUntil) return profileCache;
+  const result = await sendReport({status:"test"});
+  const value = result.profile_url;
+  if (typeof value !== "string" ||
+      !/^https:\/\/(?:www\.)?tbank(?:-online)?\.(?:ru|com)\/invest\/(?:social|pulse)\/profile\/[^/]+\/$/.test(value))
+    throw Error("Сервер вернул некорректную ссылку автора");
+  profileCache = value;
+  profileCachedUntil = Date.now() + 10000;
+  return value;
+}
 
 function bankTab(sender) {
   if (!sender.tab?.id || !sender.tab.url) return false;
@@ -19,7 +35,7 @@ function bankTab(sender) {
 }
 
 async function sendReport(report) {
-  const config = await chrome.storage.local.get(["endpoint", "client", "key", "profile_url", "enabled"]);
+  const config = await chrome.storage.local.get(["endpoint", "client", "key", "enabled"]);
   const origin = String(config.endpoint || "").replace(/\/$/, "");
   if (!BACKEND_ORIGINS.has(origin)) throw Error("Разрешён только HTTPS invest.argokov.ru или локальная админка");
   if (!/^[a-z][a-z0-9_-]{2,31}$/.test(config.client || "")) throw Error("Неверный логин кабинета");
@@ -40,11 +56,13 @@ async function sendReport(report) {
   });
   const result = await response.json().catch(() => ({}));
   if (!response.ok || !result.ok) throw Error(result.error || "Сервер вернул HTTP " + response.status);
-  await chrome.storage.local.set({
-    last_status: report.status === "test" ? "test_ok" : report.status,
-    last_sent_at: new Date().toISOString(),
-    last_error: ""
-  });
+  if (report.status !== "test") {
+    await chrome.storage.local.set({
+      last_status: report.status,
+      last_sent_at: new Date().toISOString(),
+      last_error: ""
+    });
+  }
   return result;
 }
 
@@ -108,14 +126,29 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
       if (!bankTab(sender)) throw Error("Запрос разрешён только со страницы Пульса");
       return await sendReport(message.report);
     }
+    if (message?.kind === "config") {
+      if (!bankTab(sender)) throw Error("Настройки автора доступны только со вкладки Пульса");
+      return {profile_url: await adminProfile()};
+    }
     if (message?.kind === "test") {
       if (sender.tab) throw Error("Тест запускается из настроек расширения");
-      return await sendReport({status:"test"});
+      const profile_url = await adminProfile(true);
+      return {profile_url, read_only:true};
+    }
+    if (message?.kind === "open_profile") {
+      if (sender.tab) throw Error("Открыть профиль можно только из настроек расширения");
+      const url = new URL(await adminProfile(true));
+      url.pathname = url.pathname.replace(
+        /\/invest\/(?:social|pulse)\/profile\/([^/]+)\/?$/,
+        "/invest/pulse/profile/$1/operations/");
+      if (!PULSE_HOSTS.has(url.hostname) || url.protocol !== "https:")
+        throw Error("Некорректная ссылка на профиль банка");
+      await chrome.tabs.create({url:url.href,active:true});
+      return {opened:true};
     }
     if (message?.kind === "stop") {
       if (sender.tab) throw Error("Остановить можно только из настроек расширения");
-      const cfg = await chrome.storage.local.get("profile_url");
-      return await sendReport({status:"stopped",profile_url:cfg.profile_url});
+      return await sendReport({status:"stopped",profile_url:await adminProfile(true)});
     }
     throw Error("Неизвестная команда расширения");
   })().then(data => reply({ok:true,data}), error => {
