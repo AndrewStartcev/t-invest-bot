@@ -871,12 +871,13 @@
          state.monitor.status==='scheduled'?'Ожидание расписания · МСК':realMode==='off'?(state.settings.monitoring_enabled?'Мониторинг включён':'Мониторинг выключен'):'Реальная торговля · '+(realMode==='auto'?'авто':'подтверждение');
       el('mode-badge').textContent=extensionMode?'Мониторинг через Brave · без заявок':
          state.monitor.status==='scheduled'?'Ожидание расписания · МСК':realMode==='off'?(state.settings.monitoring_enabled?'Мониторинг включён':'Мониторинг выключен'):'Реальные заявки · '+(realMode==='auto'?'авто':'подтверждение');
-      el('trade-top-status').textContent=realMode==='off'?'Брокерские заявки отключены':'Реальная торговля включена';
+      el('trade-top-status').textContent=extensionMode?'Расширение: наблюдение без брокерских заявок':realMode==='off'?'Брокерские заявки отключены':'Реальная торговля включена';
       autoCopyEnabled=state.settings.auto_demo_buy;
       el('auto-copy-button').textContent=autoCopyEnabled?'Остановить автокопирование':'Включить автокопирование';
       el('auto-copy-button').className=autoCopyEnabled?'button neutral small':'button small';
-      el('auto-copy-button').hidden=realMode!=='off';
+      el('auto-copy-button').hidden=extensionMode||realMode!=='off';
       el('copy-note').textContent=realMode==='auto'?'Новые сделки проверяются по лимитам и отправляются брокеру лимитными заявками. Для прошлых покупок подготовь заявку кнопкой в строке.':realMode==='confirm'?'Новые сделки ожидают подтверждения в журнале. Для прошлых покупок подготовь заявку кнопкой в строке.':autoCopyEnabled?'Новые покупки и продажи повторяются условно по лимитам. Кнопки в строках позволяют обработать ранее опубликованные покупки за 24 часа. Реальных заявок нет.':'Кнопки в строках условно повторяют покупки за 24 часа. Автокопирование новых сделок выключено. Реальных заявок нет.';
+      if(extensionMode)el('copy-note').textContent='Расширение передаёт в админку опубликованные сделки автора, но пока не инициирует автоматические или реальные заявки.';
       const pulse=pulseDisplayStatus(state);
       el('source-status').textContent=pulse.label;
       el('source-status').title=pulse.detail;
