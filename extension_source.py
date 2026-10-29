@@ -424,7 +424,7 @@ class ExtensionStore:
                     stable_id = "pulse:" + hashlib.sha256(
                         (profile_url + "|" + key + "|" + str(next_sequence)).encode()
                     ).hexdigest()
-                    queue.append({"id": stable_id, "trade": event,
+                    queue.append({"id": stable_id, "trade": event, "profile_url": profile_url,
                                   "status": "pending", "created_at": iso_now()})
                 if len([item for item in queue if item.get("status") != "done"]) > 2000:
                     raise ValueError("Очередь сигналов заполнена; счётчики не обновлены")
@@ -499,6 +499,12 @@ class ExtensionStore:
                 if age > 300:
                     pending["status"] = "expired"
                     pending["reason"] = "Сигнал устарел; автоматическое исполнение запрещено"
+                    self._save(data)
+                    continue
+                if (data.get("profile_url") != pending.get("profile_url")
+                        or data.get("last_status") != "ok" or not data.get("active")):
+                    pending["status"] = "expired"
+                    pending["reason"] = "Автор или источник изменился; сигнал не исполняется"
                     self._save(data)
                     continue
                 pending["status"] = "processing"
