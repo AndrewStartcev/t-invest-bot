@@ -695,8 +695,11 @@ def extension_watchdog_loop():
         try:
             EXTENSION_SOURCE.tick(alert=extension_alert)
             EXTENSION_TRADES.drain_outbox(extension_record_trade)
-        except (OSError, ValueError, TradeError) as error:
-            print("Пульс: ошибка проверки состояния расширения: " + type(error).__name__, flush=True)
+        except Exception as error:
+            # A malformed event or a failed downstream callback must not kill
+            # the watchdog thread. The outbox is left for manual review.
+            print("Пульс: обработка очереди расширения прервана: " +
+                  type(error).__name__, flush=True)
         time.sleep(5)
 
 
@@ -1921,6 +1924,7 @@ class Handler(BaseHTTPRequestHandler):
                                    "settings": load_settings(), "extension_mode": True,
                                    "extension_source": EXTENSION_SOURCE.public_status(),
                                    "extension_trades": EXTENSION_TRADES.public_snapshot(load_settings()["profile_url"]),
+                                   "extension_delivery": EXTENSION_TRADES.outbox_status(),
                                    "token_configured": bool(telegram_token()),
                                    "events": EVENTS, "demo_positions": POSITIONS,
                                    "broker_token_configured": bool(broker_token()), "broker": BROKER.copy(),
