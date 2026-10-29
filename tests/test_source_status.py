@@ -117,10 +117,10 @@ class SourceStatusTests(unittest.TestCase):
                 patch.object(demo_admin, "TODAY", [{"id": "old-trade"}]), client_server() as base:
             with urlopen(base + "/api/state", timeout=2) as response:
                 state = json.load(response)
-            self.assertEqual(state["monitor"]["status"], "error")
-            self.assertEqual(state["monitor"]["message"], message)
-            self.assertEqual(state["auth"]["message"], message)
-            self.assertEqual(state["monitor"]["last_check"], monitor["last_check"])
+            # Legacy server-reader failures must not override the browser source.
+            self.assertEqual(state["monitor"]["status"], "waiting")
+            self.assertIn("расширения Brave", state["monitor"]["message"])
+            self.assertNotIn(message, state["auth"]["message"])
             self.assertEqual(state["monitor"]["instruments"], [])
             self.assertEqual(state["today"], [])
             self.assertIsNone(state["browser_ui_url"])
