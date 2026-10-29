@@ -59,6 +59,10 @@ server {{
     location = /api/extension/report {{
         auth_basic off;
         client_max_body_size 2m;
+        # Stream large Pulse snapshots to the gateway. Do not spill request
+        # bodies to nginx's /var/lib/nginx/body temporary directory.
+        proxy_request_buffering off;
+        proxy_http_version 1.1;
         {client_proxy}
         proxy_pass http://127.0.0.1:8765;
         proxy_set_header Host $host;
