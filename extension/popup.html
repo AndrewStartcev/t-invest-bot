@@ -6,7 +6,7 @@
 <form id="config">
 <label>Адрес админки<input id="endpoint" type="url" required placeholder="https://invest.argokov.ru"></label>
 <label>Логин кабинета<input id="client" type="text" required pattern="[a-z][a-z0-9_-]{2,31}" placeholder="admin"></label>
-<label>Ссылка на автора Пульса<input id="profile" type="url" required placeholder="https://www.tbank.ru/invest/social/profile/LinMath/"></label>
+<div id="selected-profile" class="selected-profile"><small>Автор из настроек админки</small><b id="selected-author">Подключи кабинет и проверь связь</b></div>
 <label>Ключ расширения<input id="key" type="password" minlength="32" required autocomplete="off" placeholder="Скопируй из админки"></label>
 <div class="row"><label>Интервал<select id="interval"><option value="5">5 секунд</option><option value="3">3 секунды</option></select></label>
 <label class="switch">Включить<input id="enabled" type="checkbox"></label></div>
