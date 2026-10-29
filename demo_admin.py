@@ -464,8 +464,10 @@ def extension_live_source_ready(settings):
 
 def pulse_or_legacy_authorized(settings, source_key=""):
     # A browser-sourced approval can NEVER rely on a legacy AUTH flag.
-    if source_key.startswith(("pulse:", "browser-historic:")):
+    if source_key.startswith("pulse:"):
         return extension_live_source_ready(settings)
+    if source_key.startswith("browser-historic:"):
+        return extension_session_ok(settings)
     return AUTH.get("status") == "authenticated"
 
 
