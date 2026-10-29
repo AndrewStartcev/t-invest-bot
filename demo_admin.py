@@ -430,6 +430,7 @@ def extension_alert(kind, message):
     """Send source incidents without allowing extension-triggered broker orders."""
     settings = load_settings()
     event = {"time": datetime.now(timezone.utc).isoformat(), "source": "extension_status",
+             "profile": settings["profile_url"], "phase": "authorization",
              "instrument": "Пульс", "price": "—", "trade": "Ошибка расширения" if kind == "incident" else "Восстановление расширения",
              "reason": message, "severity": "error" if kind == "incident" else "info"}
     notify(event, settings, message, urgent=True)
