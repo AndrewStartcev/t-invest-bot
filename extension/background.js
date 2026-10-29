@@ -125,6 +125,23 @@ chrome.runtime.onMessage.addListener((message,sender,reply)=>{
         nickname_url:cached.nickname_url||saved["nickname_tab_"+id]||null,
         headers:safeHeaders.get(id)||saved["safe_headers_"+id]||{}};
     }
+    if(message?.kind==="portfolio") {
+      if(!bankTab(sender))throw Error("Портфель читается только из выбранного профиля Пульса");
+      if(message.report?.kind!=="portfolio")throw Error("Неверный формат портфеля");
+      const profile=checkedProfile((await send({kind:"config"})).profile_url);
+      const opened=new URL(sender.tab.url).pathname.match(/\/profile\/([^/]+)/)?.[1];
+      const selected=profile.pathname.split("/").filter(Boolean).pop();
+      if(!opened||decodeURIComponent(opened).toLowerCase()!==decodeURIComponent(selected).toLowerCase())
+        throw Error("Портфель другой учётной записи");
+      return await send(message.report);
+    }
+    if(message?.kind==="open_portfolio"){
+      if(sender.tab)throw Error("Открывается только из расширения");
+      const profile=checkedProfile((await send({kind:"config"})).profile_url);
+      const tab=await chrome.tabs.create({url:profile.href,active:true});
+      selectedTabs.add(tab.id);
+      return {opened:true};
+    }
     if(message?.kind==="report"){
       if(!bankTab(sender))throw Error("Данные принимаются только из вкладки Пульса");
       if(!message.report||!["trades","history","month_history","auth_status"].includes(message.report.kind))
