@@ -646,6 +646,13 @@
       if(!consents.children.length)consents.textContent='Разрешений без подтверждения нет';
     }
     function pulseDisplayStatus(state){
+      const ext=state.extension_source;
+      if(ext?.last_report && ext.active){
+        if(ext.last_status==='ok')return {label:'Пульс · расширение подключено',
+          detail:'Данные получены через Brave: '+fmtDate(ext.last_report)+'. Торговые заявки через расширение отключены.'};
+        return {label:'Пульс · проблема расширения',detail:ext.last_error||
+          'Нет актуальных отчётов. Открой вкладку Сделки и проверь вход в банк.',error:true};
+      }
       const m=state.monitor,a=state.auth;
       const stages={authorization:'Проверяем авторизацию Пульса',instruments:'Загружаем автора',portfolio:'Проверяем портфель автора',history:'Загружаем сделки'};
       if(m.status==='error')return {label:'Ошибка Пульса · смотри журнал',detail:(stages[m.phase]||'Обновление Пульса')+': '+m.message, error:true};
