@@ -545,7 +545,8 @@ def extension_record_trade(trade):
             except (TradeError, ValueError, OSError) as exc:
                 event.update(real_status="blocked", trade="РЕАЛЬНО: заявка заблокирована",
                              reason=str(exc)[:180])
-    elif settings.get("monitoring_enabled") and settings.get("auto_demo_buy") and schedule_open(settings):
+    elif (settings.get("monitoring_enabled") and not settings.get("paused")
+          and settings.get("auto_demo_buy") and schedule_open(settings)):
         positions = EXTENSION_PORTFOLIO.public_snapshot(settings["profile_url"]).get("positions", {})
         signal = {"ticker": trade["ticker"], "classCode": trade["classCode"],
                   "name": (meta or {}).get("showName", trade["ticker"]),
