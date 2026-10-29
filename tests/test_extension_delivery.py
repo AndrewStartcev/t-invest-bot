@@ -104,7 +104,7 @@ class BrowserLiveGuardTests(unittest.TestCase):
              patch.object(demo_admin,"EXTENSION_PORTFOLIO",self.portfolio), \
              patch.object(demo_admin,"load_settings",return_value=self.settings), \
              patch.object(demo_admin,"queue_approval", return_value={
-                 "reasons":["Подтверждение реальной сделки"]}) as approval, \
+                 "id":"test-nonce","reasons":["Подтверждение реальной сделки"]}) as approval, \
              patch.object(demo_admin,"place_real") as real, \
              patch.object(demo_admin,"notify"), patch.object(demo_admin,"add_event"):
             self.assertTrue(demo_admin.extension_live_source_ready(self.settings))
