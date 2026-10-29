@@ -15,7 +15,7 @@ function request(kind){
 }
 async function showRuntime(){
   const current=await chrome.storage.local.get([
-    "enabled","scan_stage","scan_stage_at","last_success_at","last_instrument_count","last_error","month_history_error"
+    "enabled","scan_stage","scan_stage_at","last_success_at","last_instrument_count","last_error","month_history_error","portfolio_status","portfolio_error"
   ]);
   const time=current.last_success_at
     ? " · последний успешный отчёт: "+new Date(current.last_success_at).toLocaleTimeString("ru-RU")
@@ -26,6 +26,8 @@ async function showRuntime(){
   if(current.month_history_error && current.enabled) {
     el("scan-info").textContent += " · "+current.month_history_error;
   }
+  if(current.portfolio_status) el("scan-info").textContent += " · "+current.portfolio_status;
+  if(current.portfolio_error) el("scan-info").textContent += " · Ошибка портфеля: "+current.portfolio_error;
   if(!current.enabled) status("⚠️ Передача сделок выключена. Поставь галочку и сохрани настройки.",true);
   else if(current.last_error) status("Ошибка передачи сделок: "+current.last_error,true);
   else if(current.last_success_at) status("✅ Сделки передаются в админку. "+current.last_instrument_count+" инструментов.");
@@ -55,6 +57,13 @@ el("config").addEventListener("submit",ev=>{
 el("test").addEventListener("click",async()=>{
   try{await settings();await checkConnection();await showRuntime();}
   catch(e){status(e.message,true);}
+});
+el("open-portfolio").addEventListener("click",async()=>{
+  try{
+    await settings();
+    await request("open_portfolio");
+    status("Открыл профиль автора. Перейди в «Портфель» → «Компании».");
+  }catch(error){status(error.message,true);}
 });
 el("open").addEventListener("click",async()=>{
   try{
