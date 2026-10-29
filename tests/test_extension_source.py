@@ -36,6 +36,7 @@ class ExtensionSourceTests(unittest.TestCase):
         self.assertEqual(0, self.source.accept(sample(7), PROFILE, emit=events.append)["accepted"])
         self.assertEqual(1, self.source.accept(sample(8, [trade()]), PROFILE, emit=events.append)["accepted"])
         self.assertEqual(0, self.source.accept(sample(8), PROFILE, emit=events.append)["accepted"])
+        self.assertEqual(0, self.source.accept(sample(8, [trade()]), PROFILE, emit=events.append)["accepted"])
         self.assertEqual(1, len(events))
         self.assertEqual(1, self.source.public_status()["total_events"])
 
