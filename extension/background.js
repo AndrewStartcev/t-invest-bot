@@ -9,6 +9,7 @@ const observed = new Map();
 const nicknames = new Map();
 const safeHeaders = new Map();
 let profileCache = null;
+let profileDetails = null;
 let profileCachedUntil = 0;
 
 async function adminProfile(force = false) {
@@ -21,6 +22,11 @@ async function adminProfile(force = false) {
       !/^https:\/\/(?:www\.)?tbank(?:-online)?\.(?:ru|com)\/invest\/(?:social|pulse)\/profile\/[^/]+\/$/.test(value))
     throw Error("Сервер вернул некорректную ссылку автора");
   profileCache = value;
+  profileDetails = {
+    profile_url: value,
+    reset_baseline: Boolean(result.reset_baseline),
+    counts: result.counts && typeof result.counts === "object" ? result.counts : {}
+  };
   profileCachedUntil = Date.now() + 10000;
   return value;
 }
@@ -56,6 +62,11 @@ async function sendReport(report) {
   });
   const result = await response.json().catch(() => ({}));
   if (!response.ok || !result.ok) throw Error(result.error || "Сервер вернул HTTP " + response.status);
+  if (report.status === "ok" && profileDetails && report.profile_url === profileDetails.profile_url) {
+    profileDetails = {...profileDetails, reset_baseline: false,
+      counts: Object.fromEntries((report.instruments || []).map(item =>
+        [item.ticker + ":" + item.classCode, item.totalOperationsCount]))};
+  }
   if (report.status !== "test") {
     await chrome.storage.local.set({
       last_status: report.status,
@@ -128,11 +139,13 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
     }
     if (message?.kind === "config") {
       if (!bankTab(sender)) throw Error("Настройки автора доступны только со вкладки Пульса");
-      return {profile_url: await adminProfile()};
+      await adminProfile();
+      return {...profileDetails};
     }
     if (message?.kind === "test") {
       if (sender.tab) throw Error("Тест запускается из настроек расширения");
       const profile_url = await adminProfile(true);
+      await chrome.storage.local.set({last_error:""});
       return {profile_url, read_only:true};
     }
     if (message?.kind === "open_profile") {
