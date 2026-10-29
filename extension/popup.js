@@ -20,9 +20,9 @@ async function settings(){
   const old=await chrome.storage.local.get("enabled");
   if(old.enabled && !el("enabled").checked) await request("stop");
   await chrome.storage.local.set({endpoint,client:el("client").value.trim(),
-    key:el("key").value.trim(),enabled:el("enabled").checked});
-  await chrome.storage.local.remove(["profile_url","baselines","interval"]);
-  status("Настройки сохранены. Контроль входа раз в 2 минуты.");
+    key:el("key").value.trim(),interval:Number(el("interval").value),enabled:el("enabled").checked});
+  await chrome.storage.local.remove(["profile_url","baselines"]);
+  status("Настройки сохранены. Сделки поступают из Brave в админку.");
 }
 async function checkConnection(){
   const result=await request("config");
@@ -34,7 +34,7 @@ el("config").addEventListener("submit",ev=>{
   ev.preventDefault();settings().then(checkConnection).catch(e=>status(e.message,true));
 });
 el("test").addEventListener("click",async()=>{
-  try{await settings();await checkConnection();status("✅ Сервер подключён. Авторизация проверяется во вкладке Пульса каждые 2 минуты.");}
+  try{await settings();await checkConnection();status("✅ Сервер подключён. Открой вкладку Сделки и обнови её F5.");}
   catch(e){status(e.message,true);}
 });
 el("open").addEventListener("click",async()=>{
@@ -42,17 +42,18 @@ el("open").addEventListener("click",async()=>{
   catch(e){status(e.message,true);}
 });
 (async()=>{
-  const cfg=await chrome.storage.local.get(["endpoint","client","key","enabled","last_status","last_sent_at","last_error"]);
+  const cfg=await chrome.storage.local.get(["endpoint","client","key","interval","enabled","last_status","last_sent_at","last_error"]);
   el("endpoint").value=cfg.endpoint||"https://invest.argokov.ru";
   el("client").value=cfg.client||"admin";
   el("key").value=cfg.key||"";
   el("enabled").checked=Boolean(cfg.enabled);
+  el("interval").value=String(cfg.interval===3?3:5);
   if(cfg.last_error)status("Последняя ошибка: "+cfg.last_error,true);
   else if(cfg.last_sent_at)status("Последняя проверка: "+cfg.last_status+" · "+new Date(cfg.last_sent_at).toLocaleString("ru-RU"));
   if(cfg.key?.length>=32) {
     try {
       await checkConnection();
-      status("✅ Кабинет подключён. Контроль авторизации каждые 2 минуты.");
+      status("✅ Кабинет подключён. Открой Сделки автора в Brave.");
     } catch(error) {
       status("Нет связи с админкой: " + error.message,true);
     }
