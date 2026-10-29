@@ -69,6 +69,7 @@ class BrowserBridgeTests(unittest.TestCase):
                 second = report({"kind":"trades","status":"ok","profile_url":PROFILE,
                                  "instruments":instruments,"events":[event]})
                 self.assertEqual(1, second["accepted"])
+                self.assertEqual(1,self.trades.drain_outbox(demo_admin.extension_record_trade))
                 self.assertEqual(1, record.call_count)
                 repeated = report({"kind":"trades","status":"ok","profile_url":PROFILE,
                                    "instruments":instruments,"events":[event]})
