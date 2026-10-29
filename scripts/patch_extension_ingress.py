@@ -11,7 +11,7 @@ from pathlib import Path
 
 
 LOCATION = re.compile(
-    r"(?m)^(?P<indent>[ \t]*)location[ \t]*=[ \t]*/api/extension/report[ \t]*\\{[ \t]*$"
+    r"(?m)^(?P<indent>[ \t]*)location[ \t]*=[ \t]*/api/extension/report[ \t]*\{[ \t]*$"
 )
 
 
@@ -21,7 +21,7 @@ def patch_extension_location(text: str) -> str:
         raise ValueError("Expected exactly one Nginx extension report location")
     match = matches[0]
     indentation = match.group("indent")
-    close_regex = re.compile(r"(?m)^" + re.escape(indentation) + r"\\}[ \t]*$")
+    close_regex = re.compile(r"(?m)^" + re.escape(indentation) + r"\}[ \t]*$")
     end = close_regex.search(text, match.end())
     if end is None:
         raise ValueError("Unterminated Nginx extension report location")
@@ -36,7 +36,7 @@ def patch_extension_location(text: str) -> str:
     )
     for key, value in required:
         regex = re.compile(
-            r"(?m)^([ \t]*)" + key + r"[ \t]+[^;\\n]+;[ \t]*$"
+            r"(?m)^([ \t]*)" + key + r"[ \t]+[^;\n]+;[ \t]*$"
         )
         found = list(regex.finditer(body))
         if len(found) > 1:
