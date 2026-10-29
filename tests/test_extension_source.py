@@ -66,7 +66,7 @@ class ExtensionSourceTests(unittest.TestCase):
         alert = lambda *msg: warnings.append(msg)
         self.source.accept(sample(4), PROFILE, alert=alert)
         data = json.loads(self.source.path.read_text(encoding="utf-8"))
-        data["last_report"] = (datetime.now(timezone.utc) - timedelta(seconds=40)).isoformat()
+        data["last_report"] = (datetime.now(timezone.utc) - timedelta(seconds=190)).isoformat()
         self.source._save(data)
         self.assertTrue(self.source.tick(alert=alert))
         self.assertFalse(self.source.tick(alert=alert))
