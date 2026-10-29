@@ -32,6 +32,8 @@ jobs:
           node --check extension/background.js
           node --check extension/content.js
           node --check extension/popup.js
+      - name: Verify simulated Brave history loading
+        run: node tests/test_extension_history.cjs
       - name: Validate browser-only source design
         run: |
           node -e "const fs=require('fs'); const content=fs.readFileSync('extension/content.js','utf8'); if(!content.includes('totalOperationsCount') || !content.includes('nextCursor') || !content.includes('verifyAuthor')) process.exit(1)"
