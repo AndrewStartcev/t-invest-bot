@@ -477,11 +477,11 @@ def extension_live_source_ready(settings):
     return True
 
 
-def pulse_or_legacy_authorized(settings):
-    # Preserves old test/legacy decisions while requiring explicit opt-in for
-    # all browser-fed real orders. Server Playwright is never started.
-    return (AUTH.get("status") == "authenticated"
-            or extension_live_source_ready(settings))
+def pulse_or_legacy_authorized(settings, source_key=""):
+    # A browser-sourced approval can NEVER rely on a legacy AUTH flag.
+    if source_key.startswith("pulse:"):
+        return extension_live_source_ready(settings)
+    return AUTH.get("status") == "authenticated"
 
 
 def extension_record_trade(trade):
@@ -777,7 +777,7 @@ def decide_approval(nonce, action):
                 if not settings["monitoring_enabled"] or not schedule_open(settings):
                     raise ValueError("Мониторинг выключен или сейчас вне расписания")
                 if row["mode"] == "real":
-                    if settings["real_mode"] == "off" or not pulse_or_legacy_authorized(settings):
+                    if settings["real_mode"] == "off" or not pulse_or_legacy_authorized(settings, row["source_key"]):
                         raise ValueError("Торговля или источник отключены")
                     plan, token = prepare_real(row["signal"], settings)
                     if plan_identity(plan) != plan_identity(row["plan"]):
@@ -785,7 +785,7 @@ def decide_approval(nonce, action):
                     if (time.time() >= row["expires"] or fingerprint(load_settings()) != row["fingerprint"]
                             or token != trade_token()
                             or hashlib.sha256(token.encode()).hexdigest() != row["token_hash"]
-                            or not schedule_open(settings) or not pulse_or_legacy_authorized(settings)):
+                            or not schedule_open(settings) or not pulse_or_legacy_authorized(settings, row["source_key"])):
                         raise ValueError("Подтверждение, расписание или источник изменились во время расчёта")
                     order = place_real(plan, row["source_key"], token)
                     event.update(trade="РЕАЛЬНО: заявка отправлена", real_status=order["status"],
