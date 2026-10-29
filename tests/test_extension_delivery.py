@@ -85,7 +85,7 @@ class BrowserLiveGuardTests(unittest.TestCase):
                },PROFILE,[INSTRUMENT])
         self.trade={**EVENT,"_source_key":"pulse:verified-test-1"}
 
-    def test_existing_mode_is_not_enough_to_enable_real_orders(self):
+    def test_missing_ingestion_context_never_executes_old_signals(self):
         with patch.object(demo_admin,"EXTENSION_TRADES",self.trades), \
              patch.object(demo_admin,"EXTENSION_PORTFOLIO",self.portfolio), \
              patch.object(demo_admin,"load_settings",return_value=self.settings), \
@@ -96,18 +96,17 @@ class BrowserLiveGuardTests(unittest.TestCase):
             real.assert_not_called()
             approval.assert_not_called()
             self.assertEqual("blocked",journal.call_args.args[0]["real_status"])
-            self.assertFalse(demo_admin.extension_live_source_ready(self.settings))
+            self.assertTrue(demo_admin.extension_live_source_ready(self.settings))
 
-    def test_real_confirmation_requires_explicit_opt_in_and_fresh_portfolio(self):
-        self.settings["extension_live_enabled"]=True
+    def test_existing_confirm_mode_uses_approval_without_new_consent(self):
         from trade_approvals import fingerprint
-        self.trade["_delivery_context"]={"live_enabled":True,"settings_hash":fingerprint(self.settings)}
-        with patch.dict("os.environ", {"TINVEST_ALLOW_EXTENSION_REAL":"1"}), \
-             patch.object(demo_admin,"EXTENSION_TRADES",self.trades), \
+        self.trade["_delivery_context"]={
+            "real_mode_at_ingest":"confirm","settings_hash":fingerprint(self.settings)}
+        with patch.object(demo_admin,"EXTENSION_TRADES",self.trades), \
              patch.object(demo_admin,"EXTENSION_PORTFOLIO",self.portfolio), \
              patch.object(demo_admin,"load_settings",return_value=self.settings), \
-             patch.object(demo_admin,"queue_approval", return_value={
-                 "id":"test-nonce","reasons":["Подтверждение реальной сделки"]}) as approval, \
+             patch.object(demo_admin,"queue_approval",return_value={
+                 "id":"approval-1","reasons":["Подтверждение реальной сделки"]}) as approval, \
              patch.object(demo_admin,"place_real") as real, \
              patch.object(demo_admin,"notify"), patch.object(demo_admin,"add_event"):
             self.assertTrue(demo_admin.extension_live_source_ready(self.settings))
@@ -115,17 +114,35 @@ class BrowserLiveGuardTests(unittest.TestCase):
             approval.assert_called_once()
             self.assertEqual(self.trade["_source_key"],approval.call_args.args[3])
             real.assert_not_called()
-            stale={**self.trade,"_source_key":"pulse:stale"}
-            with self.portfolio.lock:
-                state=self.portfolio._read()
-                state["checked_at"]=(datetime.now(timezone.utc)-
-                    timedelta(minutes=10)).isoformat()
-                from client_accounts import atomic_text
-                import json
-                atomic_text(self.portfolio.path,json.dumps(state))
-            demo_admin.extension_record_trade(stale)
+
+            with self.trades.lock:
+                state=self.trades._read()
+                state["last_report"]=(datetime.now(timezone.utc)-
+                                      timedelta(minutes=5)).isoformat()
+                self.trades._save(state)
+            demo_admin.extension_record_trade({**self.trade,"_source_key":"pulse:stale"})
             self.assertEqual(1,approval.call_count)
             real.assert_not_called()
+
+    def test_existing_auto_mode_submits_through_same_broker_api(self):
+        from trade_approvals import fingerprint
+        self.settings["real_mode"]="auto"
+        trade={**self.trade,"_delivery_context":{
+            "real_mode_at_ingest":"auto","settings_hash":fingerprint(self.settings)}}
+        plan={"ticker":"BSPB","class_code":"TQBR","quantity":1,
+              "estimated_rub":"124","account_id":"paper-test",
+              "price":"124","side":"buy"}
+        with patch.object(demo_admin,"EXTENSION_TRADES",self.trades), \
+             patch.object(demo_admin,"EXTENSION_PORTFOLIO",self.portfolio), \
+             patch.object(demo_admin,"load_settings",return_value=self.settings), \
+             patch.object(demo_admin,"approval_reasons",return_value=[]), \
+             patch.object(demo_admin,"prepare_real",return_value=(plan,"mock-token")) as prepare, \
+             patch.object(demo_admin,"place_real",return_value={"status":"submitted"}) as place, \
+             patch.object(demo_admin,"notify"), patch.object(demo_admin,"add_event") as journal:
+            demo_admin.extension_record_trade(trade)
+            prepare.assert_called_once()
+            place.assert_called_once_with(plan,trade["_source_key"],"mock-token")
+            self.assertEqual("submitted",journal.call_args.args[0]["real_status"])
 
 
 if __name__=="__main__":
