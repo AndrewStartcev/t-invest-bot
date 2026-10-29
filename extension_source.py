@@ -160,6 +160,12 @@ class ExtensionStore:
                 if key in counts or type(count) is not int or not 0 <= count <= 1000000000:
                     raise ValueError("Некорректные счётчики инструментов")
                 counts[key] = count
+            details = [{"ticker": item["ticker"], "classCode": item["classCode"],
+                        "showName": str(item.get("showName") or item["ticker"])[:160],
+                        "type": str(item.get("type") or "")[:32],
+                        "totalOperationsCount": item["totalOperationsCount"],
+                        "maxTradeDateTime": str(item.get("maxTradeDateTime") or "")[:40]}
+                       for item in instruments]
             normalized = [_trade(event) for event in events]
         messages = []
         with self.lock:
@@ -169,6 +175,7 @@ class ExtensionStore:
                 # A new monitored author must start at baseline, never replay old trades.
                 before = {}
                 data["counts"] = {}
+                data["instruments"] = []
                 data["recent"] = []
             if status == "ok":
                 if not counts and before:
@@ -195,6 +202,7 @@ class ExtensionStore:
                     raise ValueError("Неполная история: счётчики не обновлены")
                 fresh = normalized
                 data["counts"] = {**before, **counts}
+                data["instruments"] = details
                 data["last_ok"] = iso_now()
                 data["failures"] = 0
                 data["last_error"] = ""
@@ -202,7 +210,7 @@ class ExtensionStore:
                     messages.append(("recovered", "✅ Пульс: доступ к профилю восстановлен."))
                 data["incident"] = None
                 data["total_events"] = int(data.get("total_events", 0)) + len(fresh)
-                data["recent"] = (fresh + data.get("recent", []))[:50]
+                data["recent"] = (fresh + data.get("recent", []))[:500]
             elif status == "stopped":
                 data["active"] = False
                 data["failures"] = 0
