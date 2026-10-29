@@ -11,7 +11,7 @@ systemctl stop t-invest-bot.service
 # Fetch/pull cannot overwrite local changes or rewrite branch history.
 git pull --ff-only
 "$PROJECT/.venv/bin/python" -m pip install -r requirements.txt
-PLAYWRIGHT_BROWSERS_PATH="$PROJECT/.playwright" "$PROJECT/.venv/bin/python" -m playwright install chromium
+# Browser-session monitoring is now performed exclusively by the customer extension.
 "$PROJECT/.venv/bin/python" -m unittest discover -s tests -q
 systemctl restart t-invest-bot.service
 trap - ERR
