@@ -28,7 +28,7 @@ class ExtensionSourceTests(unittest.TestCase):
         self.assertFalse(self.source.authorized("x" * 36))
         key = self.source.pairing_key()
         self.assertTrue(self.source.authorized(key))
-        self.assertFalse(self.source.authorized(key[:-1] + "x"))
+        self.assertFalse(self.source.authorized(key[:-1] + ("y" if key.endswith("x") else "x")))
         self.assertEqual(0o600, self.source.key_path.stat().st_mode & 0o777)
 
     def test_baseline_and_exactly_once(self):
