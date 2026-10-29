@@ -175,7 +175,9 @@ class ExtensionStore:
         if any(row["ticker"] != ticker or row["classCode"] != code for row in parsed):
             raise ValueError("История содержит операции другого инструмента")
         now = datetime.now(timezone.utc)
-        cutoff = now - timedelta(hours=24)
+        # The browser scans a rolling 24h window. Allow one hour of clock
+        # drift/retry latency in storage; the dashboard still shows only 24h.
+        cutoff = now - timedelta(hours=25)
         for row in parsed:
             stamp = datetime.fromisoformat(row["tradeDateTime"].replace("Z", "+00:00"))
             if not cutoff <= stamp <= now + timedelta(minutes=5):
