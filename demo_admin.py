@@ -61,7 +61,6 @@ DEFAULTS = {
     "monitoring_enabled": False,
     "auto_demo_buy": False,
     "real_mode": "off",
-    "extension_live_enabled": False,
     "rules": DEFAULT_RULES,
     "schedule": DEFAULT_SCHEDULE,
     "policy": DEFAULT_POLICY,
@@ -312,9 +311,6 @@ def save_settings(data: dict) -> dict:
     if auto_buy and not enabled:
         raise ValueError("Для автокопирования включи мониторинг")
     real_mode = data.get("real_mode", "off")
-    extension_live_enabled = data.get("extension_live_enabled", False)
-    if type(extension_live_enabled) is not bool:
-        raise ValueError("Некорректное разрешение реальных сделок через расширение")
     if real_mode not in {"off", "confirm", "auto"}:
         raise ValueError("Неизвестный режим реальной торговли")
     if real_mode != "off" and (not enabled or auto_buy):
@@ -330,7 +326,6 @@ def save_settings(data: dict) -> dict:
         save_telegram_token(data["telegram_token"])
     settings = {"profile_url": url, "poll_seconds": seconds, "chat_id": chat_id, "paused": paused,
                 "monitoring_enabled": enabled, "auto_demo_buy": auto_buy, "real_mode": real_mode,
-                "extension_live_enabled": extension_live_enabled,
                 "rules": rules, "schedule": schedule, "policy": policy}
     SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
     temp = SETTINGS_PATH.with_suffix(".tmp")
@@ -448,35 +443,25 @@ def extension_alert(kind, message):
 
 
 def extension_live_source_ready(settings):
-    """Fail closed unless server operator also unlocked live browser signals."""
-    if os.environ.get("TINVEST_ALLOW_EXTENSION_REAL") != "1":
-        return False
-    if not settings.get("extension_live_enabled"):
-        return False
-    if not settings.get("monitoring_enabled") or not schedule_open(settings):
+    """Use the client's existing trading mode with a live Pulse browser feed.
+
+    No additional toggle, server environment unlock, or mandatory portfolio
+    read: the original order planner and approval policy still decide which
+    positions may be traded. A stale/disconnected author never authorizes
+    submitting a live order.
+    """
+    if (not settings.get("monitoring_enabled") or settings.get("paused")
+            or not schedule_open(settings)):
         return False
     source = EXTENSION_TRADES.public_snapshot(settings["profile_url"])
     if source.get("last_status") != "ok" or not source.get("active"):
         return False
-    if not source.get("last_report"):
-        return False
     try:
         last = datetime.fromisoformat(source["last_report"])
-        if last.tzinfo is None or (datetime.now(timezone.utc) - last).total_seconds() > 45:
-            return False
-    except (ValueError, TypeError):
+        return (last.tzinfo is not None and
+                0 <= (datetime.now(timezone.utc) - last).total_seconds() < 180)
+    except (KeyError, ValueError, TypeError):
         return False
-    # Never accept an unseen or stale author portfolio to waive holdings policy.
-    portfolio = EXTENSION_PORTFOLIO.public_snapshot(settings["profile_url"])
-    if portfolio.get("status") != "partial":
-        return False
-    try:
-        checked = datetime.fromisoformat(portfolio["checked_at"])
-        if checked.tzinfo is None or (datetime.now(timezone.utc) - checked).total_seconds() > 300:
-            return False
-    except (ValueError, TypeError, KeyError):
-        return False
-    return True
 
 
 def pulse_or_legacy_authorized(settings, source_key=""):
@@ -487,11 +472,10 @@ def pulse_or_legacy_authorized(settings, source_key=""):
 
 
 def extension_record_trade(trade):
-    """Use existing *paper* copy rules on new browser trades, never broker orders.
+    """Reuse the existing client-selected demo/confirm/auto order flow.
 
-    This callback runs only for committed new deltas from ExtensionStore;
-    historic 24h/monthly imports never call it. The real-order pathway stays
-    disconnected until separately approved and tested with a durable outbox.
+    Only newly committed live deltas enter this handler; historical imports
+    are display-only. Source identifiers remain durable across HTTP retries.
     """
     settings = load_settings()
     snapshot = EXTENSION_TRADES.public_snapshot(settings["profile_url"])
@@ -511,12 +495,12 @@ def extension_record_trade(trade):
         capture = trade.get("_delivery_context", {})
         if (not extension_live_source_ready(settings)
                 or capture.get("settings_hash") != fingerprint(settings)
-                or capture.get("live_enabled") is not True):
+                or capture.get("real_mode_at_ingest") != settings.get("real_mode")):
             event.update(real_status="blocked", trade="РЕАЛЬНО: источник не подтверждён",
-                         reason="Требуется явное разрешение в момент получения сигнала, свежие данные автора и портфеля")
+                         reason="Источник Пульса недоступен либо настройки торговли изменились после получения сигнала")
         else:
             portfolio = EXTENSION_PORTFOLIO.public_snapshot(settings["profile_url"])
-            position = portfolio["positions"].get(
+            position = portfolio.get("positions", {}).get(
                 trade["ticker"] + ":" + trade["classCode"], {"status": "unavailable"})
             signal = {"ticker": trade["ticker"], "classCode": trade["classCode"],
                       "name": (meta or {}).get("showName", trade["ticker"]),
@@ -1927,7 +1911,6 @@ class Handler(BaseHTTPRequestHandler):
                 self.respond(200, {"approvals": APPROVALS.public(), "asset_consents": list(APPROVALS.consents),
                                    "investor_portfolio": EXTENSION_PORTFOLIO.public_snapshot(load_settings()["profile_url"]),
                                    "settings": load_settings(), "extension_mode": True,
-                                   "extension_live_server_approved": os.environ.get("TINVEST_ALLOW_EXTENSION_REAL") == "1",
                                    "extension_source": EXTENSION_SOURCE.public_status(),
                                    "extension_trades": EXTENSION_TRADES.public_snapshot(load_settings()["profile_url"]),
                                    "extension_delivery": EXTENSION_TRADES.outbox_status(),
@@ -1986,7 +1969,7 @@ class Handler(BaseHTTPRequestHandler):
                         report, settings["profile_url"],
                         delivery_context={
                             "settings_hash": fingerprint(settings),
-                            "live_enabled": settings.get("extension_live_enabled") is True
+                            "real_mode_at_ingest": settings.get("real_mode")
                         })
                     if report.get("status") == "ok":
                         EXTENSION_SOURCE.accept_auth({"kind":"auth_status","status":"authenticated"},
