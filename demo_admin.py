@@ -1738,7 +1738,7 @@ class Handler(BaseHTTPRequestHandler):
                                    "monitor": dashboard["monitor"],
                                    "auth": dashboard["auth"],
                                    "server_mode": server_mode(), "shared_source": shared_source(),
-                                   "browser_ui_url": "/desktop/vnc.html?autoconnect=1&resize=scale&path=desktop/websockify&view_only=false" if server_mode() and not shared_source() else None,
+                                   "browser_ui_url": None,
                                    "today": dashboard["today"],
                                    "month": dashboard["month"]})
         else:
@@ -1774,6 +1774,13 @@ class Handler(BaseHTTPRequestHandler):
                 self.respond(200, result)
             except (ValueError, TypeError, PulseError) as error:
                 self.respond(422, {"error": str(error)[:240]})
+            return
+        # Legacy browser actions are unavailable in extension-source mode.
+        # They must never create a Playwright session or an unprocessed queue.
+        if self.path in {"/api/auth/start", "/api/auth/check", "/api/browser/show",
+                         "/api/source/refresh", "/api/month", "/api/history",
+                         "/source-admin/api/start"}:
+            self.respond(409, {"error": "Источник Пульса — расширение Brave. Открой Сделки в браузере клиента."})
             return
         if self.path == "/_telegram/callback" and os.environ.get("TINVEST_BACKEND_KEY"):
             try:
