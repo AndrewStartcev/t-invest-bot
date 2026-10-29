@@ -1780,7 +1780,10 @@ class Handler(BaseHTTPRequestHandler):
         if self.path in {"/api/auth/start", "/api/auth/check", "/api/browser/show",
                          "/api/source/refresh", "/api/month", "/api/history",
                          "/source-admin/api/start"}:
-            self.respond(409, {"error": "Источник Пульса — расширение Brave. Открой Сделки в браузере клиента."})
+            denied = shared_source() and self.path in {
+                "/api/auth/start", "/api/auth/check", "/api/browser/show"}
+            self.respond(403 if denied else 409, {
+                "error": "Источник Пульса — расширение Brave. Открой Сделки в браузере клиента."})
             return
         if self.path == "/_telegram/callback" and os.environ.get("TINVEST_BACKEND_KEY"):
             try:
