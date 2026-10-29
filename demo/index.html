@@ -327,6 +327,11 @@
                 <div class="source-line"><span>Профиль</span><b id="source-profile">—</b></div>
                 <div class="source-line"><span>Режим</span><b id="source-mode">—</b></div>
                 <div class="source-line"><span>Последняя проверка</span><b id="last-check">—</b></div>
+                <div class="source-line"><span>Расширение Brave (только наблюдение)</span><b id="extension-status">Не подключено</b></div>
+                <div class="source-line"><span>Отчёт расширения</span><b id="extension-last">—</b></div>
+                <div class="source-line"><span>Сделок расширения</span><b id="extension-count">0</b></div>
+                <button class="button neutral small space-top" id="extension-pair" type="button">Скопировать ключ расширения</button>
+                <p class="muted space-top" id="extension-note">В расширении укажи адрес панели, свой логин, профиль и ключ. Банковский вход на сервере не нужен. Реальные заявки через расширение отключены.</p>
                 <p id="overview-progress">Проверяем подключение к Пульсу</p><p class="muted space-top" id="source-message">Подключаемся к Пульсу…</p>
                 <button class="button neutral small space-top" id="refresh-source" type="button">Проверить данные</button>
               <div class="form-actions"><a class="button neutral small" id="server-browser-top" target="_blank" rel="noopener noreferrer" hidden>Браузер Пульса</a><button class="button neutral small" type="button" id="connect-pulse" hidden>Подключить Пульс</button><span id="trade-top-status">Брокерские заявки отключены</span></div></div></section></div>
@@ -362,7 +367,7 @@
   <script>
     const el = id => document.getElementById(id);
     let instruments = [], today = [], month = {status:'idle',items:[]}, monthView = false, events = [], realOrders = [], selected = null, historyCursor = null, tokenConfigured = false, authStatus = 'checking', authDismissed = false, instrumentLimit = 60, autoCopyEnabled = false, realMode = 'off', currentPreview = null;
-    let serverBrowserUrl = null, pulseWindow = null, popupBlocked = false, sharedSource = false, latestPulseState = null;
+    let serverBrowserUrl = null, pulseWindow = null, popupBlocked = false, sharedSource = false, latestPulseState = null, extensionConnected = false;
     const tabs = [...document.querySelectorAll('[data-view]')];
     const pages = [...document.querySelectorAll('.view')];
     const names = {overview:'Обзор',settings:'Настройки',journal:'Журнал'};
@@ -431,7 +436,7 @@
       el('startup-message').hidden = true;
       authStatus = auth.status;
       const ready = auth.status === 'authenticated';
-      const showDialog = !sharedSource && !ready && !authDismissed;
+      const showDialog = !sharedSource && !ready && !authDismissed && !extensionConnected;
       el('auth-screen').hidden = !showDialog;
       el('admin-app').inert = showDialog;
       document.body.style.overflow = showDialog ? 'hidden' : '';
@@ -487,6 +492,18 @@
       }catch(error){el('source-message').textContent=error.message;el('overview-progress').textContent=error.message;}
       finally{setTimeout(()=>{buttons.forEach(button=>button.disabled=false);el('refresh-author').textContent='Обновить';},3000);}
     }
+    el('extension-pair').addEventListener('click', async () => {
+      const button = el('extension-pair');
+      button.disabled = true;
+      try {
+        const result = await api('/api/extension/pairing');
+        if (!navigator.clipboard?.writeText) throw Error('В этом браузере недоступен буфер обмена');
+        await navigator.clipboard.writeText(result.key);
+        el('extension-note').textContent = 'Ключ скопирован. Кабинет: ' + result.client +
+          '. Вставь его в расширение Brave, затем нажми «Проверить связь». Не отправляй ключ в переписке.';
+      } catch(error) { el('extension-note').textContent = 'Не удалось скопировать ключ: ' + error.message; }
+      finally { button.disabled = false; }
+    });
     el('refresh-source').addEventListener('click',refreshAuthor);
     el('refresh-author').addEventListener('click',refreshAuthor);
     function renderToday() {
@@ -734,7 +751,20 @@
     function renderState(state){
       latestPulseState=state;
       el('account-panel').hidden=!state.account?.password_change;el('settings-tab-account').hidden=!state.account?.password_change;el('account-login').textContent=state.account?.username||'';
-      sharedSource=Boolean(state.shared_source);renderAuth(state.auth);instruments=state.monitor.instruments||[];today=state.today||[];month=state.month||{status:'idle',items:[]};events=state.events||[];realOrders=state.real_orders||[];realMode=state.settings.real_mode||'off';
+      sharedSource=Boolean(state.shared_source);
+      const extensionState = state.extension_source || {};
+      extensionConnected = extensionState.last_status === 'ok';
+      el('extension-status').textContent = extensionState.last_status === 'ok' ? 'Подключено (чтение)' :
+        extensionState.last_status === 'never' || !extensionState.last_status ? 'Не подключено' :
+        extensionState.last_status === 'offline' ? 'Нет связи > 30 секунд' :
+        extensionState.last_status === 'restricted' ? 'Профиль недоступен / закрыт' :
+        extensionState.last_status === 'login_required' ? 'Нужен вход в банк' :
+        extensionState.last_status === 'stopped' ? 'Остановлено' :
+        'Ошибка: ' + extensionState.last_status;
+      el('extension-last').textContent = extensionState.last_report ? fmtDate(extensionState.last_report) : '—';
+      el('extension-count').textContent = String(extensionState.total_events || 0);
+      el('extension-note').textContent = extensionState.last_error || 'Только наблюдение: сделки из расширения не исполняются на брокерском счёте.';
+      renderAuth(state.auth);instruments=state.monitor.instruments||[];today=state.today||[];month=state.month||{status:'idle',items:[]};events=state.events||[];realOrders=state.real_orders||[];realMode=state.settings.real_mode||'off';
       for(const id of ['server-browser-auth','server-browser-top']){const link=el(id);link.hidden=!state.browser_ui_url;if(state.browser_ui_url)link.href=state.browser_ui_url;}
       serverBrowserUrl=state.browser_ui_url||null;
       if(state.server_mode){el('auth-instructions').textContent='Нажми «Войти в Т-Банк»: окно банка откроется у тебя в браузере. Заверши вход; сеанс сохранится на сервере. После входа это окно можно закрыть.';el('panel-location').textContent=sharedSource?'Источник Пульса — владелец сервиса · брокерский счёт — клиент':'Серверная панель · мониторинг работает на сервере';}
