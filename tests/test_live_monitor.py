@@ -218,10 +218,11 @@ class LiveMonitorTests(unittest.TestCase):
             try:
                 request = Request(f"http://127.0.0.1:{server.server_port}/api/month",
                                   data=b"{}", headers={"Content-Type": "application/json"})
-                with urlopen(request, timeout=2) as response:
-                    self.assertEqual(response.status, 202)
-                self.assertEqual(month["status"], "loading")
-                self.assertEqual(requests.get_nowait()["action"], "month")
+                with self.assertRaises(HTTPError) as denied:
+                    urlopen(request, timeout=2)
+                self.assertEqual(409, denied.exception.code)
+                self.assertEqual(month["status"], "idle")
+                self.assertTrue(requests.empty())
             finally:
                 server.shutdown()
                 server.server_close()
@@ -458,13 +459,12 @@ class LiveMonitorTests(unittest.TestCase):
             try:
                 url = f"http://127.0.0.1:{server.server_port}/api/auth/start"
                 request = Request(url, data=b"{}", headers={"Content-Type": "application/json"})
-                with urlopen(request, timeout=2) as response:
-                    self.assertEqual(response.status, 202)
-                    self.assertTrue(json.load(response)["ok"])
-                with urlopen(request, timeout=2) as response:
-                    self.assertEqual(response.status, 202)
-                self.assertEqual(requests.qsize(), 1)
-                self.assertEqual(auth["status"], "opening")
+                for _ in range(2):
+                    with self.assertRaises(HTTPError) as denied:
+                        urlopen(request, timeout=2)
+                    self.assertEqual(409, denied.exception.code)
+                self.assertTrue(requests.empty())
+                self.assertEqual(auth["status"], "required")
             finally:
                 server.shutdown()
                 server.server_close()
