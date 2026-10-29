@@ -7,7 +7,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const vm = require("node:vm");
 
-async function runCycle(doneList) {
+async function runCycle(doneList, published=1) {
   const profile = "https://www.tbank.ru/invest/social/profile/LinMath/";
   const browser = "https://www.tbank.ru/invest/pulse/profile/LinMath/operations/";
   const endpoint = "https://www.tbank.ru/mybank/api/invest/social/v1/profile/uuid/instrument?sessionId=private-token";
@@ -59,7 +59,10 @@ async function runCycle(doneList) {
       assert.equal(request.searchParams.get("sessionId"),"private-token",
         "the bank's sessionId stays in browser-side history URL");
       return {ok:true,status:200,url:request.href,json:async()=>({payload:{
-        items:[{action:"buy",tradeDateTime:timestamp,averagePrice:123.45}],
+        items:Array.from({length:published}, (_,i)=>({
+          action:"buy",tradeDateTime:new Date(Date.parse(timestamp)-i*1000).toISOString(),
+          averagePrice:123.45
+        })),
         hasNext:false
       }})};
     }
@@ -71,14 +74,15 @@ async function runCycle(doneList) {
     setTimeout(){return 1;},clearTimeout(){}};
   vm.runInNewContext(fs.readFileSync("extension/content.js","utf8"),context,
     {filename:"extension/content.js"});
-  for(let tries=0;tries<100 && reports.length<(doneList.length?2:3);tries++)
+  const wanted=(doneList.length?1:2)+Math.ceil(published/200);
+  for(let tries=0;tries<200 && reports.length<wanted;tries++)
     await new Promise(resolve=>setTimeout(resolve,4));
   assert.equal(reports[0]?.kind,"trades");
   assert.equal(reports[0]?.events.length,0);
   assert.equal(reports[0]?.instruments.length,1);
   if(doneList.length) {
     assert.equal(historyCalls,1,"24h history must not rescan; monthly history still loads");
-    assert.equal(reports.length,2);
+    assert.equal(reports.length,wanted);
   }else{
     assert.equal(historyCalls,2);
     assert.equal(reports[1]?.kind,"history");
@@ -90,7 +94,12 @@ async function runCycle(doneList) {
   assert(monthly,"a month-history batch must be sent independently");
   assert.equal(monthly.batch_index,0);
   assert.equal(monthly.complete,true);
-  assert.equal(monthly.events.length,1);
+  assert.equal(monthly.events.length,Math.min(200,published));
+  const monthlyReports=reports.filter(row=>row.kind==="month_history");
+  assert.equal(monthlyReports.length,Math.ceil(published/200));
+  assert(monthlyReports.at(-1).complete);
+  assert.deepEqual(monthlyReports.map(row=>row.batch_index),
+    Array.from({length:monthlyReports.length},(_,i)=>i));
   assert(!JSON.stringify(reports).includes("private-token"),
     "the bank's request sessionId must never leave the browser");
 }
@@ -98,5 +107,6 @@ async function runCycle(doneList) {
 (async()=>{
   await runCycle([]);
   await runCycle(["BSPB:TQBR"]);
-  process.stdout.write("Pulse browser 24h history bridge checks passed\n");
+  await runCycle(["BSPB:TQBR"],205);
+  process.stdout.write("Pulse browser 24h/30d paginated history bridge checks passed\n");
 })().catch(error=>{console.error(error);process.exitCode=1;});
