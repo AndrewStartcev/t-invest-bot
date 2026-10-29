@@ -2258,8 +2258,14 @@ class Handler(BaseHTTPRequestHandler):
                 self.respond(202, {"ok": True})
             elif self.path == "/api/demo/buy":
                 candidate_id = data.get("id")
+                browser_candidate = None
+                if isinstance(candidate_id, str) and candidate_id.startswith("extension:"):
+                    browser_candidate = next(
+                        (item for item in extension_dashboard()["today"] if item["id"] == candidate_id),
+                        None)
                 with LOCK:
-                    candidate = next((item.copy() for item in TODAY if item["id"] == candidate_id), None)
+                    candidate = (browser_candidate if browser_candidate is not None
+                                 else next((item.copy() for item in TODAY if item["id"] == candidate_id), None))
                     duplicate = any(item.get("source_event_id") == candidate_id and item.get("trade") == "ДЕМО: куплено" for item in EVENTS)
                     if not candidate or not candidate["can_demo_buy"] or duplicate:
                         raise ValueError("Сделка недоступна для демо-покупки")
