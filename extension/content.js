@@ -183,7 +183,11 @@
     const cutoff = Date.now() - HISTORY_HORIZON_MS;
     const pending = instruments.filter(item => {
       if (item.totalOperationsCount <= 0) return false;
-      const last = Date.parse(item.maxTradeDateTime || "");
+      const rawDate = String(item.maxTradeDateTime || "");
+      // The server considers timestamps without a timezone unknown. Keep
+      // candidate selection identical to avoid a permanently incomplete scan.
+      const hasTimezone = /(?:Z|[+-]\\d{2}:\\d{2})$/i.test(rawDate);
+      const last = hasTimezone ? Date.parse(rawDate) : NaN;
       if(Number.isFinite(last) && last < cutoff) return false;
       const key = item.ticker + ":" + item.classCode;
       return !done.has(key) && Date.now() >= (historyRetryAt.get(key) || 0);
