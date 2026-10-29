@@ -538,23 +538,26 @@
     el('refresh-author').addEventListener('click',refreshAuthor);
     function renderToday() {
       const box=el('today-list'); box.replaceChildren();
-      const items=monthView?(month.status==='ready'?month.items:[]):today;
+      const items=monthView?(month.items||[]):today;
       el('trades-heading').textContent=monthView?'Сделки автора за 30 дней':'Сделки автора за 24 часа';
       el('month-button').textContent=monthView?'Вернуться к 24 часам':'Посмотреть за месяц';
       const scanning=extensionMode && latestPulseState?.history_progress &&
         !latestPulseState.history_progress.complete;
-      el('today-count').textContent=monthView&&month.status==='loading'?'Загрузка…':
-        scanning ? (items.length?items.length+'+ сделок · загружаем':'Загрузка истории…'):
-        items.length+' сделок';
+      el('today-count').textContent=monthView&&month.status==='loading'
+        ? (items.length?items.length+'+ сделок · загрузка за месяц':'Загрузка месяца…')
+        : scanning&&!monthView?(items.length?items.length+'+ сделок · загружаем':'Загрузка истории…')
+        : items.length+' сделок';
       const monthMessage=el('month-message');monthMessage.className=month.status==='error'||month.skipped?.length?'toast error space-top':'toast space-top';
       const history=latestPulseState?.history_progress||{};
       const progress=Number(history.completed||0),target=Number(history.target_total||0);
-      monthMessage.textContent=monthView?(month.status==='loading'?month.message||'Читаем историю за 30 дней…':month.status==='error'?month.message||'История не загрузилась':month.status==='ready'?(month.skipped?.length?`${month.message}. Пропущены: ${month.skipped.slice(0,5).join(', ')}${month.skipped.length>5?' и другие':''}.`:'Загружено за последние 30 дней · только сделки не старше 24 часов можно повторить'):'Месячная история не загружена; вернись к 24 часам и открой её снова')
+      monthMessage.textContent=monthView?(month.status==='loading'
+        ?(month.message||'Читаем историю за 30 дней…')+' · найдено '+(month.items?.length||0)+' сделок; данные неполные до окончания загрузки'
+        :month.status==='error'?month.message||'История не загрузилась':month.status==='ready'?(month.skipped?.length?`${month.message}. Пропущены: ${month.skipped.slice(0,5).join(', ')}${month.skipped.length>5?' и другие':''}.`:'Загружено за последние 30 дней · только сделки не старше 24 часов можно повторить'):'Месячная история не загружена; вернись к 24 часам и открой её снова')
         :extensionMode?(latestPulseState?.extension_trades?.history_truncated?'История очень большая: показана только часть операций.'
           :history.complete?'История за последние 24 часа проверена · '+progress+' инструментов.'
           :'Загружаем историю за 24 часа через Brave: проверено '+progress+' из '+target+' инструментов. Найденные сделки отображаются по мере загрузки.'):'';
 
-      if(!items.length){box.className='empty';box.textContent=monthView?(month.status==='ready'?(month.skipped?.length?'Доступных сделок за 30 дней не найдено; часть инструментов пропущена':'За последние 30 дней опубликованных сделок не найдено'):month.status==='error'?'Загрузка не удалась. Вернись к 24 часам и нажми «Посмотреть за месяц» ещё раз.':'Загружаем сделки автора за 30 дней…'):(extensionMode&&!history.complete?'Идёт загрузка истории через Brave. Доступные сделки появятся здесь по мере получения.':'За последние 24 часа опубликованных сделок не найдено');return;}
+      if(!items.length){box.className='empty';box.textContent=monthView?(month.status==='ready'?'За последние 30 дней опубликованных сделок не найдено':'Загружаем историю за 30 дней через расширение…'):(extensionMode&&!history.complete?'Идёт загрузка истории через Brave. Доступные сделки появятся здесь по мере получения.':'За последние 24 часа опубликованных сделок не найдено');return;}
       box.className='table-wrap';const table=document.createElement('table');
       const head=document.createElement('thead');head.innerHTML='<tr><th>Время</th><th>Инструмент</th><th>Действие</th><th>Цена</th><th>Операция</th></tr>';table.append(head);
       const body=document.createElement('tbody');
@@ -886,8 +889,7 @@
       el('profile-heading').textContent=profile+' · профиль Пульса';el('source-profile').textContent=profile;
       el('source-mode').textContent=extensionMode?'Источник: расширение Brave · только чтение':
          state.monitor.status==='scheduled'?'Ожидание расписания · МСК':realMode==='off'?(state.settings.monitoring_enabled?'Мониторинг включён':'Мониторинг выключен'):'Реальная торговля · '+(realMode==='auto'?'авто':'подтверждение');
-      el('month-button').hidden=extensionMode;
-      if(extensionMode)monthView=false;
+      el('month-button').hidden=false;
       el('mode-badge').textContent=extensionMode?'Мониторинг через Brave · без заявок':
          state.monitor.status==='scheduled'?'Ожидание расписания · МСК':realMode==='off'?(state.settings.monitoring_enabled?'Мониторинг включён':'Мониторинг выключен'):'Реальные заявки · '+(realMode==='auto'?'авто':'подтверждение');
       el('trade-top-status').textContent=extensionMode?'Расширение: наблюдение без брокерских заявок':realMode==='off'?'Брокерские заявки отключены':'Реальная торговля включена';
@@ -972,6 +974,7 @@
     el('monitor-enabled').addEventListener('change',()=>{if(!el('monitor-enabled').checked)el('auto-buy').checked=false;});
     el('month-button').addEventListener('click',async()=>{
       if(monthView){monthView=false;renderToday();return;}
+      if(extensionMode){monthView=true;renderToday();return;}
       monthView=true;renderToday();
       const button=el('month-button');button.disabled=true;
       try{await api('/api/month',{});await refresh();}
