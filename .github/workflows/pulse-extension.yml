@@ -1,0 +1,35 @@
+name: Pulse extension checks
+on:
+  push:
+    branches: [feature/pulse-browser-extension-mvp]
+  pull_request:
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Check Python syntax
+        run: python -m compileall -q demo_admin.py tenant_gateway.py extension_source.py scripts/render_nginx.py
+      - name: Run read-only source tests
+        run: python -m unittest discover -s tests -p 'test_extension_source.py' -v
+      - name: Check nginx template render
+        run: python scripts/render_nginx.py invest.argokov.ru --https --multi-user > /tmp/t-invest-test.conf
+  extension:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Validate JS
+        run: |
+          node --check extension/background.js
+          node --check extension/content.js
+          node --check extension/popup.js
+      - name: Validate MV3 manifest
+        run: |
+          node -e "const m=require('./extension/manifest.json'); if(m.manifest_version!==3 || !m.background.service_worker) process.exit(1)"
