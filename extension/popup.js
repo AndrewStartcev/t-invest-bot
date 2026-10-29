@@ -13,6 +13,21 @@ function request(kind){
     resolve(response.data);
   }));
 }
+async function showRuntime(){
+  const current=await chrome.storage.local.get([
+    "enabled","scan_stage","scan_stage_at","last_success_at","last_instrument_count","last_error"
+  ]);
+  const time=current.last_success_at
+    ? " · последний успешный отчёт: "+new Date(current.last_success_at).toLocaleTimeString("ru-RU")
+    : "";
+  el("scan-info").textContent=(current.scan_stage||"Первый снимок ещё не получен")+
+    (Number.isInteger(current.last_instrument_count)
+      ? " · "+current.last_instrument_count+" инструментов":"")+time;
+  if(!current.enabled) status("⚠️ Передача сделок выключена. Поставь галочку и сохрани настройки.",true);
+  else if(current.last_error) status("Ошибка передачи сделок: "+current.last_error,true);
+  else if(current.last_success_at) status("✅ Сделки передаются в админку. "+current.last_instrument_count+" инструментов.");
+  else status("Кабинет подключён, но первый снимок сделок ещё не получен. Открой «Сделки» в Brave и обнови F5.");
+}
 async function settings(){
   const endpoint=el("endpoint").value.trim().replace(/\/$/,"");
   if(!ALLOWED.has(endpoint)) throw Error("Допускается только адрес T-Invest Bot");
@@ -31,15 +46,21 @@ async function checkConnection(){
   return result;
 }
 el("config").addEventListener("submit",ev=>{
-  ev.preventDefault();settings().then(checkConnection).catch(e=>status(e.message,true));
+  ev.preventDefault();
+  settings().then(checkConnection).then(showRuntime).catch(e=>status(e.message,true));
 });
 el("test").addEventListener("click",async()=>{
-  try{await settings();await checkConnection();status("✅ Сервер подключён. Открой вкладку Сделки и обнови её F5.");}
+  try{await settings();await checkConnection();await showRuntime();}
   catch(e){status(e.message,true);}
 });
 el("open").addEventListener("click",async()=>{
-  try{await settings();await request("open_login");status("Вкладка Пульса открыта. При необходимости войди в Т-Банк.");}
-  catch(e){status(e.message,true);}
+  try{
+    el("enabled").checked=true;
+    await settings();
+    await request("open_login");
+    await showRuntime();
+    status("Мониторинг включён. Войди в Пульс и обнови вкладку «Сделки» (F5).");
+  }catch(e){status(e.message,true);}
 });
 (async()=>{
   const cfg=await chrome.storage.local.get(["endpoint","client","key","interval","enabled","last_status","last_sent_at","last_error"]);
@@ -53,9 +74,9 @@ el("open").addEventListener("click",async()=>{
   if(cfg.key?.length>=32) {
     try {
       await checkConnection();
-      status("✅ Кабинет подключён. Открой Сделки автора в Brave.");
+      await showRuntime();
     } catch(error) {
       status("Нет связи с админкой: " + error.message,true);
     }
-  }
+  }else await showRuntime();
 })().catch(e=>status(e.message,true));
