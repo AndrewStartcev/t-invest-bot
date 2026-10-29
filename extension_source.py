@@ -117,7 +117,10 @@ class ExtensionStore:
             raise ValueError("Нужен объект JSON")
         status = report.get("status")
         if status == "test":
-            return {"ok": True, "read_only": True}
+            # Pairing credentials are already validated by the HTTP handler.
+            # The cabinet is the only authority for the monitored author.
+            return {"ok": True, "read_only": True,
+                    "profile_url": canonical_profile_url(expected_profile)}
         if status not in VALID_STATUS:
             raise ValueError("Неизвестный статус")
         profile_url = canonical_profile_url(report.get("profile_url"))
