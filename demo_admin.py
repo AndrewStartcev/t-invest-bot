@@ -476,24 +476,45 @@ def extension_dashboard():
     names = {item["ticker"] + ":" + item["classCode"]: item.get("showName") or item["ticker"]
              for item in instruments}
     cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
-    for index, trade in enumerate(snapshot.get("recent", [])):
-        try:
-            when = datetime.fromisoformat(trade["tradeDateTime"])
-            if when.tzinfo is None or when < cutoff:
+    # A historic scan may overlap subsequent live delta reports. Merge by
+    # multiset maximum instead of concatenation: identical published trades
+    # remain distinct, but overlapping copies cannot inflate 24h totals.
+    from collections import Counter
+    def signature(trade):
+        return (trade["ticker"], trade["classCode"], trade["action"],
+                datetime.fromisoformat(trade["tradeDateTime"].replace("Z", "+00:00")).isoformat(),
+                trade["averagePrice"])
+    counts = Counter()
+    original = {}
+    for channel in ("history_entries", "recent"):
+        current = Counter()
+        for trade in snapshot.get(channel, []):
+            try:
+                when = datetime.fromisoformat(trade["tradeDateTime"].replace("Z", "+00:00"))
+                if when.tzinfo is None or when < cutoff:
+                    continue
+                key = signature(trade)
+                current[key] += 1
+                original[key] = trade
+            except (ValueError, TypeError, KeyError):
                 continue
-            display.append({"id": "extension:" + str(index), "name": names.get(
+        for key, quantity in current.items():
+            counts[key] = max(counts[key], quantity)
+    for key, amount in counts.items():
+        trade = original[key]
+        for occurrence in range(amount):
+            display.append({"id": "extension:" + str(len(display)), "name": names.get(
                             trade["ticker"] + ":" + trade["classCode"], trade["ticker"]),
                             "ticker": trade["ticker"], "classCode": trade["classCode"],
                             "tradeDateTime": trade["tradeDateTime"], "action": trade["action"],
                             "price": trade["averagePrice"], "currency": "",
                             "can_demo_buy": False})
-        except (ValueError, TypeError, KeyError):
-            continue
     return {"auth": {"status": "authenticated" if connected else "required", "message": message},
             "monitor": {"status": "running" if connected else "waiting", "message": message,
                         "phase": "extension", "profile": nickname, "last_check": latest,
                         "instrument_count": len(instruments), "instruments": instruments},
             "today": sorted(display, key=lambda item: item["tradeDateTime"], reverse=True),
+            "history_progress": snapshot.get("history", {}),
             "month": {"status": "idle", "items": [], "processed": 0, "total": 0,
                       "message": "Через расширение пока передаются новые операции", "loaded_at": None}}
 
@@ -1740,6 +1761,7 @@ class Handler(BaseHTTPRequestHandler):
                                    "server_mode": server_mode(), "shared_source": shared_source(),
                                    "browser_ui_url": None,
                                    "today": dashboard["today"],
+                                   "history_progress": dashboard["history_progress"],
                                    "month": dashboard["month"]})
         else:
             self.respond(404, {"error": "Не найдено"})
@@ -1765,7 +1787,9 @@ class Handler(BaseHTTPRequestHandler):
                     current = EXTENSION_TRADES.accept({"status":"test"}, load_settings()["profile_url"])
                     self.respond(200, current)
                     return
-                if report.get("kind") == "trades":
+                if report.get("kind") == "history":
+                    result = EXTENSION_TRADES.accept_history(report, load_settings()["profile_url"])
+                elif report.get("kind") == "trades":
                     result = EXTENSION_TRADES.accept(report, load_settings()["profile_url"],
                                                      emit=extension_record_trade)
                     if report.get("status") == "ok":
