@@ -23,7 +23,7 @@ VALID_STATUS = {"ok", "restricted", "login_required", "unavailable", "rate_limit
 KEY_RE = re.compile(r"^[A-Za-z0-9_.-]{1,32}$")
 MAX_INSTRUMENTS = 6000
 MAX_EVENTS = 500
-STALE_SECONDS = 30
+STALE_SECONDS = 180
 
 
 def iso_now():
@@ -263,7 +263,7 @@ class ExtensionStore:
                 if age >= STALE_SECONDS:
                     data["incident"] = "offline"
                     self._save(data)
-                    message = "⚠️ Пульс: расширение не отправляет данные более 30 секунд. Проверь браузер и вкладку."
+                    message = "⚠️ Пульс: расширение не отправляет данные более 3 минут. Проверь браузер и вкладку."
         if message and alert:
             alert("incident", message)
         return bool(message)
