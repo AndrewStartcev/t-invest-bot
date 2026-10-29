@@ -1,17 +1,17 @@
 <!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Пульс · Авторизация</title><link rel="stylesheet" href="popup.css"></head>
+<title>Пульс · Источник данных</title><link rel="stylesheet" href="popup.css"></head>
 <body>
-<header><span class="eyebrow">T-Invest · Пульс</span><h1>Контроль входа</h1><p>Проверяет авторизацию в браузере каждые 2 минуты. Без чтения сделок и банковских cookie.</p></header>
+<header><span class="eyebrow">T-Invest · Пульс</span><h1>Мониторинг сделок</h1><p>Данные Пульса передаются из авторизованного Brave в админку. Банковский вход на сервере не нужен.</p></header>
 <form id="config">
 <label>Адрес админки<input id="endpoint" type="url" required placeholder="https://invest.argokov.ru"></label>
 <label>Логин кабинета<input id="client" type="text" required pattern="[a-z][a-z0-9_-]{2,31}" placeholder="admin"></label>
 <label>Ключ расширения<input id="key" type="password" minlength="32" required autocomplete="off" placeholder="Скопируй из админки"></label>
 <div class="selected-profile"><small>Автор выбран в админке</small><b id="selected-author">Подключи кабинет</b></div>
-<label class="switch">Проверять вход<input id="enabled" type="checkbox"></label>
+<div class="row"><label>Проверка сделок<select id="interval"><option value="5">5 секунд</option><option value="3">3 секунды</option></select></label><label class="switch">Включить<input id="enabled" type="checkbox"></label></div>
 <button type="submit" class="primary">Сохранить</button>
 </form>
 <div class="actions"><button id="test" type="button">Проверить связь</button><button id="open" type="button">Войти в Пульс</button></div>
 <div id="status" role="status" aria-live="polite">Расширение готово к настройке.</div>
-<p class="footnote">Расширение контролирует только сессию. Для проверки держи вкладку Пульса открытой; в фоне Brave может замедлить проверки. Уведомления об истечении сессии отправляет сервер в Telegram.</p>
+<p class="footnote">Расширение читает опубликованные сделки и проверяет вход в Пульс в браузере. Держи вкладку «Сделки» открытой; браузер может замедлять фоновые проверки. Вход и cookie остаются в Brave.</p>
 <script src="popup.js"></script></body></html>
