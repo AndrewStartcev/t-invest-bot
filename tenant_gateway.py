@@ -185,7 +185,7 @@ class Gateway(BaseHTTPRequestHandler):
                     self.reply(415, {"error": "Нужен JSON"})
                     return
                 length = int(self.headers.get("Content-Length", "0"))
-                if not 0 < length <= (128 * 1024 if extension else 8192):
+                if not 0 < length <= (2 * 1024 * 1024 if extension else 8192):
                     raise ValueError("Некорректный размер запроса")
                 body = self.rfile.read(length)
                 data = json.loads(body)
