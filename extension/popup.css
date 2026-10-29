@@ -3,3 +3,6 @@
 .selected-profile{padding:10px 12px;margin:0 0 12px;border:1px solid #cbd8e9;border-radius:8px;background:#eef4fc}
 .selected-profile small{display:block;color:#5a7490;font-size:11px;margin-bottom:4px}
 .selected-profile b{display:block;font-size:13px;overflow-wrap:anywhere}
+
+.scan-info{font-size:11px;line-height:1.55;margin:4px 0 14px;color:#47637e;overflow-wrap:anywhere}
+.switch{cursor:pointer}
