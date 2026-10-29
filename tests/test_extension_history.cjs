@@ -30,7 +30,7 @@ async function runCycle(doneList) {
       sendMessage(message,callback){
         if(message.kind==="config"){
           callback({ok:true,data:{profile_url:profile,counts:{"BSPB:TQBR":2},
-            history_done:doneList}});
+            history_done:doneList,month_done:[],month_offsets:{}}});
         }else if(message.kind==="get_instrument_url"){
           callback({ok:true,data:{instrument_url:endpoint,nickname_url:nickname,headers:{}}});
         }else if(message.kind==="report"){
@@ -71,23 +71,28 @@ async function runCycle(doneList) {
     setTimeout(){return 1;},clearTimeout(){}};
   vm.runInNewContext(fs.readFileSync("extension/content.js","utf8"),context,
     {filename:"extension/content.js"});
-  for(let tries=0;tries<100 && reports.length<(doneList.length?1:2);tries++)
+  for(let tries=0;tries<100 && reports.length<(doneList.length?2:3);tries++)
     await new Promise(resolve=>setTimeout(resolve,4));
   assert.equal(reports[0]?.kind,"trades");
   assert.equal(reports[0]?.events.length,0);
   assert.equal(reports[0]?.instruments.length,1);
   if(doneList.length) {
-    assert.equal(historyCalls,0,"completed history must not rescan on restart");
-    assert.equal(reports.length,1);
+    assert.equal(historyCalls,1,"24h history must not rescan; monthly history still loads");
+    assert.equal(reports.length,2);
   }else{
-    assert.equal(historyCalls,1);
+    assert.equal(historyCalls,2);
     assert.equal(reports[1]?.kind,"history");
     assert.equal(reports[1]?.events.length,1);
     assert.equal(reports[1]?.events[0].ticker,"BSPB");
     assert.equal(reports[1]?.events[0].tradeDateTime,timestamp);
   }
+  const monthly=reports.find(row=>row.kind==="month_history");
+  assert(monthly,"a month-history batch must be sent independently");
+  assert.equal(monthly.batch_index,0);
+  assert.equal(monthly.complete,true);
+  assert.equal(monthly.events.length,1);
   assert(!JSON.stringify(reports).includes("private-token"),
-    "the bank's request sessionId must never leave Brave");
+    "the bank's request sessionId must never leave the browser");
 }
 
 (async()=>{
