@@ -29,10 +29,20 @@ async function send(report){
   });
   const data=await response.json().catch(()=>({}));
   if(!response.ok||!data.ok)throw Error(data.error||"HTTP "+response.status);
-  if(report.kind!=="config")await chrome.storage.local.set({
-    last_status:report.kind==="trades"?"ok":report.status,
-    last_sent_at:new Date().toISOString(),last_error:""});
-  else await chrome.storage.local.set({last_error:""});
+  if(report.kind==="trades") {
+    await chrome.storage.local.set({
+      last_status:report.status,
+      last_sent_at:new Date().toISOString(),
+      last_error:report.status==="ok"?"":String(report.error||"Не удалось получить сделки").slice(0,200),
+      last_instrument_count:report.status==="ok"?report.instruments.length:undefined,
+      last_success_at:report.status==="ok"?new Date().toISOString():undefined
+    });
+  } else if(report.kind==="auth_status") {
+    await chrome.storage.local.set({
+      last_auth_status:report.status,
+      last_auth_sent_at:new Date().toISOString()
+    });
+  }
   return data;
 }
 function checkedProfile(value){
