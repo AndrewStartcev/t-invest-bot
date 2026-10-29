@@ -448,7 +448,9 @@ def extension_alert(kind, message):
 
 
 def extension_live_source_ready(settings):
-    """Fail closed unless the *selected* author has a fresh browser report."""
+    """Fail closed unless server operator also unlocked live browser signals."""
+    if os.environ.get("TINVEST_ALLOW_EXTENSION_REAL") != "1":
+        return False
     if not settings.get("extension_live_enabled"):
         return False
     if not settings.get("monitoring_enabled") or not schedule_open(settings):
@@ -1925,6 +1927,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.respond(200, {"approvals": APPROVALS.public(), "asset_consents": list(APPROVALS.consents),
                                    "investor_portfolio": EXTENSION_PORTFOLIO.public_snapshot(load_settings()["profile_url"]),
                                    "settings": load_settings(), "extension_mode": True,
+                                   "extension_live_server_approved": os.environ.get("TINVEST_ALLOW_EXTENSION_REAL") == "1",
                                    "extension_source": EXTENSION_SOURCE.public_status(),
                                    "extension_trades": EXTENSION_TRADES.public_snapshot(load_settings()["profile_url"]),
                                    "extension_delivery": EXTENSION_TRADES.outbox_status(),
