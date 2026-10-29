@@ -8,7 +8,7 @@
   const VALID_HOSTS = new Set(["www.tbank.ru", "tbank.ru", "www.tbank-online.com", "tbank-online.com"]);
   const MAX_ITEMS = 500;
   const MAX_DELTA = 100;
-  let instrumentUrl = null, busy = false, lastProfileCheck = 0, previousStart = 0;
+  let instrumentUrl = null, nicknameUrl = null, busy = false, lastProfileCheck = 0, lastIdentityCheck = 0, previousStart = 0;
   let consecutiveFailures = 0;
   const mountedAt = Date.now();
 
@@ -117,6 +117,34 @@
     throw Error("История " + ticker + " неполная; счётчики сохранены без изменения");
   }
 
+  async function verifyAuthor() {
+    if (Date.now()-lastIdentityCheck < 90000) return;
+    if (!nicknameUrl || !instrumentUrl) throw Error("Не обнаружен запрос подтверждения автора; обнови Сделки F5");
+    const nickname = new URL(nicknameUrl);
+    if (nickname.origin !== location.origin ||
+        decodeURIComponent(nickname.pathname.split("/").pop()).toLowerCase() !== selectedNickname(location.href)) {
+      throw Error("Нельзя подтвердить соответствие страницы выбранному автору");
+    }
+    const uuid = new URL(instrumentUrl).pathname.match(/\/profile\/([^/]+)\/instrument/);
+    if (!uuid) throw Error("Неподтверждённый адрес списка инструментов");
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(),9000);
+    try {
+      const response = await fetch(nickname.href, {
+        credentials:"include",cache:"no-store",signal:controller.signal
+      });
+      if (!response.ok) {
+        const error = Error("Автор Пульса: HTTP " + response.status);
+        error.status = response.status;
+        throw error;
+      }
+      const data = await response.json();
+      if (typeof data?.payload?.id !== "string" || data.payload.id !== uuid[1])
+        throw Error("UUID инструментов не принадлежит автору на странице; обнови её F5");
+      lastIdentityCheck = Date.now();
+    } finally { clearTimeout(timer); }
+  }
+
   async function profileCheck() {
     if (Date.now()-lastProfileCheck < 90000) return;
     lastProfileCheck = Date.now();
@@ -141,11 +169,12 @@
       const cfg = await chrome.storage.local.get(["enabled", "profile_url", "baselines", "interval"]);
       const interval = cfg.interval === 3 ? 3000 : 5000;
       if (!cfg.enabled || !operationsTab() || selectedNickname(cfg.profile_url) !== selectedNickname(location.href)) return interval;
-      if (!instrumentUrl) {
+      if (!instrumentUrl || !nicknameUrl) {
         const result = await request({kind:"get_instrument_url"});
         instrumentUrl = result.url;
+        nicknameUrl = result.nickname_url;
       }
-      if (!instrumentUrl) {
+      if (!instrumentUrl || !nicknameUrl) {
         if (Date.now()-mountedAt > 20000)
           await request({kind:"report", report:{status:"unavailable",profile_url:cfg.profile_url,
             error:"Не найден запрос списка инструментов. Открой Сделки и обнови вкладку F5."}});
@@ -155,6 +184,7 @@
         await request({kind:"report",report:{status:"background_throttled",profile_url:cfg.profile_url,
           error:"Вкладка находится в фоне; браузер замедляет интервалы."}});
       }
+      await verifyAuthor();
       await profileCheck();
       const list = await instruments();
       const baselines = cfg.baselines || {};
@@ -204,7 +234,21 @@
     if (message?.kind === "instrument_url") {
       try {
         const parsed = new URL(message.url);
-        if (parsed.origin === location.origin && INSTRUMENT_PATH.test(parsed.pathname)) instrumentUrl=parsed.href;
+        if (parsed.origin === location.origin && INSTRUMENT_PATH.test(parsed.pathname)) {
+          instrumentUrl=parsed.href;
+          lastIdentityCheck=0;
+        }
+      } catch { /* Not a Pulse URL. */ }
+    }
+    if (message?.kind === "nickname_url") {
+      try {
+        const parsed = new URL(message.url);
+        const match=/\/social\/v1\/profile\/nickname\/([^/]+)\/?$/.exec(parsed.pathname);
+        if (parsed.origin === location.origin && match &&
+            decodeURIComponent(match[1]).toLowerCase() === selectedNickname(location.href)) {
+          nicknameUrl=parsed.href;
+          lastIdentityCheck=0;
+        }
       } catch { /* Not a Pulse URL. */ }
     }
   });
