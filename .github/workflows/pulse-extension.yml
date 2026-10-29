@@ -33,6 +33,9 @@ jobs:
           node --check extension/content.js
           node --check extension/popup.js
           node --check extension/portfolio.js
+      - name: Validate admin inline JavaScript
+        run: |
+          node -e "const fs=require('fs'); const src=fs.readFileSync('demo/index.html','utf8'); const blocks=[...src.matchAll(/<script\\b[^>]*>([\\s\\S]*?)<\\/script>/g)]; for(const b of blocks) new Function(b[1]); if(!blocks.length) process.exit(1)"
       - name: Verify simulated Brave history loading
         run: node tests/test_extension_history.cjs
       - name: Validate browser-only source design
