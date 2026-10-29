@@ -5,6 +5,12 @@ import unittest
 from io import BytesIO
 from pathlib import Path
 from zipfile import ZipFile
+from http.server import ThreadingHTTPServer
+from threading import Thread
+from unittest.mock import patch
+from urllib.request import urlopen
+
+import demo_admin
 
 from extension_archive import EXTENSION_FILES, ZIP_ROOT, extension_zip
 
@@ -25,6 +31,24 @@ class ArchiveTests(unittest.TestCase):
                 self.assertNotIn(".local", name)
                 self.assertNotIn("token.txt", name)
                 self.assertFalse(name.startswith("/"))
+
+    def test_http_download_has_valid_zip_and_attachment_header(self):
+        with patch.dict("os.environ", {"TINVEST_BACKEND_KEY": ""}):
+            server = ThreadingHTTPServer(("127.0.0.1", 0), demo_admin.Handler)
+            thread = Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                with urlopen(f"http://127.0.0.1:{server.server_port}/api/extension/download.zip",timeout=5) as response:
+                    self.assertEqual(200,response.status)
+                    self.assertEqual("application/zip",response.headers["Content-Type"])
+                    self.assertIn("attachment",response.headers["Content-Disposition"])
+                    raw=response.read()
+                with ZipFile(BytesIO(raw)) as archive:
+                    self.assertIn(ZIP_ROOT + "/manifest.json",archive.namelist())
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=2)
 
     def test_no_secrets_from_data_dir(self):
         with tempfile.TemporaryDirectory() as tmp:
