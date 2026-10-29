@@ -92,6 +92,7 @@ class ExtensionHistoryTests(unittest.TestCase):
                       "instruments":instruments,"events":[trade]})
                 self.assertEqual(2,len(state()["today"]),
                     "Overlapping live and historic copies must not inflate totals")
+                self.assertEqual(1,self.trades.drain_outbox(demo_admin.extension_record_trade))
                 self.assertEqual(1,add_event.call_count)
             finally:
                 server.shutdown()
