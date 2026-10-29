@@ -186,7 +186,7 @@
       const rawDate = String(item.maxTradeDateTime || "");
       // The server considers timestamps without a timezone unknown. Keep
       // candidate selection identical to avoid a permanently incomplete scan.
-      const hasTimezone = /(?:Z|[+-]\\d{2}:\\d{2})$/i.test(rawDate);
+      const hasTimezone = /(?:Z|[+-]\d{2}:\d{2})$/i.test(rawDate);
       const last = hasTimezone ? Date.parse(rawDate) : NaN;
       if(Number.isFinite(last) && last < cutoff) return false;
       const key = item.ticker + ":" + item.classCode;
