@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "T-Invest Pulse Browser Source",
-  "version": "0.5.0",
-  "description": "Авторизация и чтение инструментов и сделок Пульса через браузер клиента, без банковского входа на сервере",
+  "version": "0.6.0",
+  "description": "Мониторинг сделок и чтение видимого портфеля Пульса через Яндекс Браузер / Brave без серверного входа",
   "minimum_chrome_version": "120",
   "permissions": [
     "storage",
@@ -26,13 +26,14 @@
         "https://*.tbank-online.com/invest/*"
       ],
       "js": [
-        "content.js"
+        "content.js",
+        "portfolio.js"
       ],
       "run_at": "document_idle"
     }
   ],
   "action": {
-    "default_title": "Пульс · Сделки за 24 часа",
+    "default_title": "T-Invest · сделки и портфель",
     "default_popup": "popup.html"
   }
 }
