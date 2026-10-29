@@ -20,7 +20,13 @@ from pulse_live import canonical_profile_url
 
 VALID_STATUS = {"ok", "restricted", "login_required", "unavailable", "rate_limited",
                 "background_throttled", "stopped"}
-KEY_RE = re.compile(r"^[A-Za-z0-9_.-]{1,32}$")
+# Pulse can expose derivatives, FX pairs and synthetic symbols with /, +,
+# @, colons, non-Latin letters or identifiers longer than 32 characters.
+# Treat ticker as opaque display/API data; never rewrite it into another symbol.
+# The class code cannot contain ":" because persisted watermarks use ticker:class.
+FORBIDDEN_SYMBOL_CHARS = frozenset('<>"\\\\' + chr(39))
+MAX_TICKER_LENGTH = 128
+MAX_CLASS_CODE_LENGTH = 64
 MAX_INSTRUMENTS = 6000
 MAX_EVENTS = 500
 STALE_SECONDS = 180
@@ -30,10 +36,22 @@ def iso_now():
     return datetime.now(timezone.utc).isoformat()
 
 
+def _valid_symbol(value, limit, *, allow_colon):
+    if not isinstance(value, str) or not 1 <= len(value) <= limit:
+        return False
+    if not value.isprintable() or value != value.strip():
+        return False
+    if any(char in FORBIDDEN_SYMBOL_CHARS for char in value):
+        return False
+    if not allow_colon and ":" in value:
+        return False
+    return True
+
+
 def _instrument_key(ticker, class_code):
-    if not isinstance(ticker, str) or not KEY_RE.fullmatch(ticker):
+    if not _valid_symbol(ticker, MAX_TICKER_LENGTH, allow_colon=True):
         raise ValueError("Некорректный тикер")
-    if not isinstance(class_code, str) or not KEY_RE.fullmatch(class_code):
+    if not _valid_symbol(class_code, MAX_CLASS_CODE_LENGTH, allow_colon=False):
         raise ValueError("Некорректный classCode")
     return ticker + ":" + class_code
 
@@ -152,10 +170,16 @@ class ExtensionStore:
             if (not isinstance(instruments, list) or len(instruments) > MAX_INSTRUMENTS
                     or not isinstance(events, list) or len(events) > MAX_EVENTS):
                 raise ValueError("Снимок слишком большой или неполный")
-            for item in instruments:
+            for index, item in enumerate(instruments, start=1):
                 if not isinstance(item, dict):
-                    raise ValueError("Некорректный инструмент")
-                key = _instrument_key(item.get("ticker"), item.get("classCode"))
+                    raise ValueError(f"Некорректный инструмент №{index}")
+                try:
+                    key = _instrument_key(item.get("ticker"), item.get("classCode"))
+                except ValueError as exc:
+                    # Symbols are public identifiers, but escape control chars
+                    # and cap diagnostic length before returning to the UI.
+                    sample = ascii(item.get("ticker"))[:80]
+                    raise ValueError(f"{exc} у инструмента №{index}: {sample}") from exc
                 count = item.get("totalOperationsCount")
                 if key in counts or type(count) is not int or not 0 <= count <= 1000000000:
                     raise ValueError("Некорректные счётчики инструментов")
