@@ -22,7 +22,7 @@ from demo_engine import DEFAULT_RULES, asset_type, simulate, validated_rules
 from broker_read import BrokerError, account_snapshot, read_only_accounts
 from broker_trade import TradeError, full_access_accounts, order_state, prepare_order, submit_order
 from telegram_notify import NotificationError, send_notification
-from extension_source import ExtensionStore
+from pulse_auth_monitor import PulseAuthStore
 from extension_archive import ZIP_NAME, extension_zip
 from server_config import public_origin, server_mode, shared_source, source_key, validate_source_config
 from pulse_live import PulseBrowser, PulseError, canonical_profile_url, operations_url
@@ -38,7 +38,7 @@ from short_simulation import simulate_with_short
 
 ROOT = Path(__file__).resolve().parent
 DATA_DIR = Path(os.environ.get("TINVEST_DATA_DIR", str(ROOT / ".local"))).expanduser().resolve()
-EXTENSION_SOURCE = ExtensionStore(DATA_DIR)
+EXTENSION_SOURCE = PulseAuthStore(DATA_DIR)
 SETTINGS_PATH = DATA_DIR / "demo-settings.json"
 STATE_PATH = DATA_DIR / "pulse-live-state.json"
 EVENTS_PATH = DATA_DIR / "events.json"
@@ -428,29 +428,13 @@ def notify(event: dict, settings: dict, message: str, *, urgent: bool = False, k
 
 
 def extension_alert(kind, message):
-    """Send source incidents without allowing extension-triggered broker orders."""
+    """Notify about the browser's authorization only, never trades or profiles."""
     settings = load_settings()
     event = {"time": datetime.now(timezone.utc).isoformat(), "source": "extension_status",
-             "profile": settings["profile_url"], "phase": "authorization",
-             "instrument": "Пульс", "price": "—", "trade": "Ошибка расширения" if kind == "incident" else "Восстановление расширения",
+             "phase": "authorization", "instrument": "Авторизация Пульса",
+             "trade": "Вход требуется" if kind == "incident" else "Авторизация восстановлена",
              "reason": message, "severity": "error" if kind == "incident" else "info"}
     notify(event, settings, message, urgent=True)
-    add_event(event)
-
-
-def extension_record_trade(trade):
-    settings = load_settings()
-    action = "Покупка" if trade["action"] == "buy" else "Продажа"
-    event = {"time": datetime.now(timezone.utc).isoformat(), "source": "extension_trade",
-             "profile": settings["profile_url"], "instrument": trade["ticker"],
-             "ticker": trade["ticker"], "classCode": trade["classCode"],
-             "side": trade["action"], "price": trade["averagePrice"],
-             "tradeDateTime": trade["tradeDateTime"],
-             "trade": "Расширение: " + action + " (наблюдение, без заявки)",
-             "reason": "Данные из авторизованного браузера клиента; брокерских запросов нет"}
-    if settings.get("monitoring_enabled"):
-        notify(event, settings, f"Пульс · {trade['ticker']} · {action} · {trade['averagePrice']}. "
-              "Расширение, только наблюдение; реальной заявки нет.")
     add_event(event)
 
 
@@ -1701,8 +1685,11 @@ class Handler(BaseHTTPRequestHandler):
                 if not 0 < length <= 128 * 1024:
                     raise ValueError("Некорректный размер отчёта")
                 report = json.loads(self.rfile.read(length))
-                result = EXTENSION_SOURCE.accept(report, load_settings()["profile_url"],
-                                                 emit=extension_record_trade, alert=extension_alert)
+                if report == {"kind": "config"}:
+                    self.respond(200, {"ok": True, "read_only": True,
+                                       "profile_url": canonical_profile_url(load_settings()["profile_url"])})
+                    return
+                result = EXTENSION_SOURCE.accept_auth(report, alert=extension_alert)
                 self.respond(200, result)
             except (ValueError, TypeError, PulseError) as error:
                 self.respond(422, {"error": str(error)[:240]})
