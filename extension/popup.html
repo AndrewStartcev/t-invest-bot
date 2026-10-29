@@ -2,7 +2,7 @@
 <html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Пульс · Источник данных</title><link rel="stylesheet" href="popup.css"></head>
 <body>
-<header><span class="eyebrow">T-Invest · Пульс</span><h1>Мониторинг сделок</h1><p>Данные Пульса передаются из авторизованного Brave в админку. Банковский вход на сервере не нужен.</p></header>
+<header><span class="eyebrow">T-Invest · Пульс</span><h1>Мониторинг сделок</h1><p>Данные Пульса передаются из авторизованного Яндекс Браузера (или Brave) в админку. Банковский вход на сервере не нужен.</p></header>
 <form id="config">
 <label>Адрес админки<input id="endpoint" type="url" required placeholder="https://invest.argokov.ru"></label>
 <label>Логин кабинета<input id="client" type="text" required pattern="[a-z][a-z0-9_-]{2,31}" placeholder="admin"></label>
@@ -13,5 +13,5 @@
 </form>
 <div class="actions"><button id="test" type="button">Проверить связь</button><button id="open" type="button">Войти и начать</button></div>
 <div id="status" role="status" aria-live="polite">Расширение готово к настройке.</div><p id="scan-info" class="scan-info" aria-live="polite">Данные по инструментам ещё не получены.</p>
-<p class="footnote">Расширение читает опубликованные сделки и проверяет вход в Пульс в браузере. Держи вкладку «Сделки» открытой; браузер может замедлять фоновые проверки. Вход и cookie остаются в Brave.</p>
+<p class="footnote">Расширение читает опубликованные сделки и проверяет вход в Пульс в браузере. Держи вкладку «Сделки» открытой; браузер может замедлять фоновые проверки. Вход и cookie остаются в твоём браузере.</p>
 <script src="popup.js"></script></body></html>
