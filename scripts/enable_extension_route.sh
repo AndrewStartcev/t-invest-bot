@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install the extension ingress route while preserving the current credentials.
+# Update the exact extension ingress without changing the rest of an existing vhost.
 # The rest of the app and brokerage process are not restarted by this script.
 set -euo pipefail
 
@@ -28,10 +28,8 @@ if ! nginx -t; then
   echo "Существующий nginx не проходит проверку; конфигурация не менялась." >&2
   exit 1
 fi
-if grep -Fq 'location = /api/extension/report {' "$CONFIG" && grep -Fq 'client_max_body_size 2m;' "$CONFIG"; then
-  echo "Маршрут расширения уже поддерживает 2 МБ. Перезагрузка не нужна."
-  exit 0
-fi
+# Existing ingress is patched in place; never regenerate a customized vhost.
+# The fresh-location fallback below keeps legacy installation behavior.
 
 backup=$(mktemp /etc/nginx/sites-available/t-invest-bot.backup.XXXXXXXX)
 temp=$(mktemp /etc/nginx/sites-available/t-invest-bot.new.XXXXXXXX)
@@ -47,10 +45,22 @@ rollback() {
 }
 trap rollback ERR
 
-python3 "$PROJECT/scripts/render_nginx.py" "$DOMAIN" --https > "$temp"
-if ! grep -Fq 'location = /api/extension/report {' "$temp"; then
-  echo "Маршрут расширения отсутствует в новой конфигурации." >&2
+if grep -Fq 'location = /api/extension/report {' "$CONFIG"; then
+  python3 "$PROJECT/scripts/patch_extension_ingress.py" "$CONFIG" > "$temp"
+else
+  python3 "$PROJECT/scripts/render_nginx.py" "$DOMAIN" --https > "$temp"
+fi
+if ! grep -Fq 'location = /api/extension/report {' "$temp" || \
+   ! grep -Fq 'proxy_request_buffering off;' "$temp" || \
+   ! grep -Fq 'proxy_http_version 1.1;' "$temp"; then
+  echo "Нужные настройки потоковой передачи расширения отсутствуют." >&2
   false
+fi
+if cmp -s "$temp" "$CONFIG"; then
+  rm -f "$temp" "$backup"
+  trap - ERR
+  echo "Маршрут расширения уже настроен для потоковой передачи. Перезагрузка не нужна."
+  exit 0
 fi
 
 # Replace only the project's known vhost. Do not touch other domains.
@@ -59,5 +69,5 @@ mv -f "$temp" "$CONFIG"
 nginx -t
 systemctl reload nginx
 trap - ERR
-echo "Готово: маршрут расширения включён для https://$DOMAIN/"
+echo "Готово: потоковая передача отчётов расширения включена для https://$DOMAIN/"
 echo "Копия предыдущего конфига: $backup"
