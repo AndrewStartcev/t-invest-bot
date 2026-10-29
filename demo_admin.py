@@ -22,6 +22,8 @@ from demo_engine import DEFAULT_RULES, asset_type, simulate, validated_rules
 from broker_read import BrokerError, account_snapshot, read_only_accounts
 from broker_trade import TradeError, full_access_accounts, order_state, prepare_order, submit_order
 from telegram_notify import NotificationError, send_notification
+from extension_source import ExtensionStore
+from extension_archive import ZIP_NAME, extension_zip
 from server_config import public_origin, server_mode, shared_source, source_key, validate_source_config
 from pulse_live import PulseBrowser, PulseError, canonical_profile_url, operations_url
 from pulse_replay import write_state
@@ -36,6 +38,7 @@ from short_simulation import simulate_with_short
 
 ROOT = Path(__file__).resolve().parent
 DATA_DIR = Path(os.environ.get("TINVEST_DATA_DIR", str(ROOT / ".local"))).expanduser().resolve()
+EXTENSION_SOURCE = ExtensionStore(DATA_DIR)
 SETTINGS_PATH = DATA_DIR / "demo-settings.json"
 STATE_PATH = DATA_DIR / "pulse-live-state.json"
 EVENTS_PATH = DATA_DIR / "events.json"
@@ -422,6 +425,33 @@ def notify(event: dict, settings: dict, message: str, *, urgent: bool = False, k
         }[result]
     except NotificationError as error:
         event["notification"] = str(error)
+
+
+def extension_alert(kind, message):
+    """Send source incidents without allowing extension-triggered broker orders."""
+    settings = load_settings()
+    event = {"time": datetime.now(timezone.utc).isoformat(), "source": "extension_status",
+             "profile": settings["profile_url"], "phase": "authorization",
+             "instrument": "Пульс", "price": "—", "trade": "Ошибка расширения" if kind == "incident" else "Восстановление расширения",
+             "reason": message, "severity": "error" if kind == "incident" else "info"}
+    notify(event, settings, message, urgent=True)
+    add_event(event)
+
+
+def extension_record_trade(trade):
+    settings = load_settings()
+    action = "Покупка" if trade["action"] == "buy" else "Продажа"
+    event = {"time": datetime.now(timezone.utc).isoformat(), "source": "extension_trade",
+             "profile": settings["profile_url"], "instrument": trade["ticker"],
+             "ticker": trade["ticker"], "classCode": trade["classCode"],
+             "side": trade["action"], "price": trade["averagePrice"],
+             "tradeDateTime": trade["tradeDateTime"],
+             "trade": "Расширение: " + action + " (наблюдение, без заявки)",
+             "reason": "Данные из авторизованного браузера клиента; брокерских запросов нет"}
+    if settings.get("monitoring_enabled"):
+        notify(event, settings, f"Пульс · {trade['ticker']} · {action} · {trade['averagePrice']}. "
+              "Расширение, только наблюдение; реальной заявки нет.")
+    add_event(event)
 
 
 def queue_approval(event, signal, settings, source_key, reasons):
@@ -1215,7 +1245,11 @@ def monitor_loop() -> None:
     reconnect_delay = 3.0
     source_cache = {}
     schedule_was_open = False
+    next_extension_tick = 0.0
     while True:
+        if time.time() >= next_extension_tick:
+            EXTENSION_SOURCE.tick(alert=extension_alert)
+            next_extension_tick = time.time() + 5
         settings = load_settings()
         if scheduled_pause(settings):
             schedule_was_open = False
@@ -1446,7 +1480,11 @@ def remote_monitor_loop() -> None:
     month_scan = None
     next_poll = 0
     schedule_was_open = False
+    next_extension_tick = 0.0
     while True:
+        if time.time() >= next_extension_tick:
+            EXTENSION_SOURCE.tick(alert=extension_alert)
+            next_extension_tick = time.time() + 5
         settings = load_settings()
         if scheduled_pause(settings):
             schedule_was_open = False
@@ -1606,6 +1644,26 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
+        elif self.path == "/api/extension/download.zip":
+            # This route remains behind the cabinet's ordinary web login.
+            # The archive is built exclusively from known extension source files.
+            try:
+                body = extension_zip(ROOT)
+            except (OSError, ValueError):
+                self.respond(503, {"error": "Архив расширения временно недоступен"})
+                return
+            self.send_response(200)
+            self.send_header("Content-Type", "application/zip")
+            self.send_header("Content-Disposition", f'attachment; filename="{ZIP_NAME}"')
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif self.path == "/api/extension/pairing":
+            self.respond(200, {"key": EXTENSION_SOURCE.pairing_key(),
+                               "client": os.environ.get("TINVEST_CLIENT_USERNAME", "admin"),
+                               "profile_url": load_settings()["profile_url"], "read_only": True})
         elif self.path == "/api/health":
             self.respond(200, {"status": "ok", "server_mode": server_mode()})
         elif self.path == "/api/state":
@@ -1614,7 +1672,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.respond(200, {"approvals": APPROVALS.public(), "asset_consents": list(APPROVALS.consents),
                                    "investor_portfolio": (INVESTOR_PORTFOLIO.copy() if authenticated and INVESTOR_PORTFOLIO.get("profile_url") == load_settings()["profile_url"]
                                                           else portfolio_unavailable(load_settings()["profile_url"], "Портфель выбранного автора ещё не проверен")),
-                                   "settings": load_settings(), "token_configured": bool(telegram_token()),
+                                   "settings": load_settings(), "extension_source": EXTENSION_SOURCE.public_status(), "token_configured": bool(telegram_token()),
                                    "events": EVENTS, "demo_positions": POSITIONS,
                                    "broker_token_configured": bool(broker_token()), "broker": BROKER.copy(),
                                    "trade_token_configured": bool(trade_token()), "trading": TRADING.copy(),
@@ -1630,6 +1688,24 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         if not self.backend_authorized():
+            return
+        if self.path == "/api/extension/report":
+            if not EXTENSION_SOURCE.authorized(self.headers.get("X-TInvest-Extension-Key", "")):
+                self.respond(401, {"error": "Неверный ключ расширения"})
+                return
+            if self.headers.get("Content-Type", "").split(";")[0] != "application/json":
+                self.respond(415, {"error": "Нужен application/json"})
+                return
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+                if not 0 < length <= 128 * 1024:
+                    raise ValueError("Некорректный размер отчёта")
+                report = json.loads(self.rfile.read(length))
+                result = EXTENSION_SOURCE.accept(report, load_settings()["profile_url"],
+                                                 emit=extension_record_trade, alert=extension_alert)
+                self.respond(200, result)
+            except (ValueError, TypeError, PulseError) as error:
+                self.respond(422, {"error": str(error)[:240]})
             return
         if self.path == "/_telegram/callback" and os.environ.get("TINVEST_BACKEND_KEY"):
             try:

@@ -1,0 +1,38 @@
+{
+  "manifest_version": 3,
+  "name": "T-Invest Pulse Monitor (read-only)",
+  "version": "0.1.0",
+  "description": "Чтение опубликованных сделок Пульса в авторизованном браузере без передачи банковских cookie серверу.",
+  "minimum_chrome_version": "120",
+  "permissions": [
+    "storage",
+    "tabs",
+    "webRequest"
+  ],
+  "host_permissions": [
+    "https://*.tbank.ru/*",
+    "https://*.tbank-online.com/*",
+    "https://invest.argokov.ru/*",
+    "http://127.0.0.1/*",
+    "http://localhost/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://*.tbank.ru/invest/*",
+        "https://*.tbank-online.com/invest/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_title": "T-Invest Pulse Monitor",
+    "default_popup": "popup.html"
+  }
+}

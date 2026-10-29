@@ -54,6 +54,23 @@ server {{
     add_header Referrer-Policy no-referrer always;
 
     {owner_location}
+    # Extension reports use per-client pairing keys, not banking credentials.
+    # Only this precise path is accessible without the dashboard password.
+    location = /api/extension/report {{
+        auth_basic off;
+        client_max_body_size 128k;
+        {client_proxy}
+        proxy_pass http://127.0.0.1:8765;
+        proxy_set_header Host $host;
+        proxy_set_header Authorization "";
+        proxy_set_header Cookie "";
+        proxy_set_header X-TInvest-User "";
+        proxy_set_header X-TInvest-Source-Key "";
+        proxy_set_header X-TInvest-Extension-Client $http_x_tinvest_extension_client;
+        proxy_set_header X-TInvest-Extension-Key $http_x_tinvest_extension_key;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_read_timeout 20s;
+    }}
     location = /desktop/websockify {{
         {owner_auth}
         proxy_pass http://127.0.0.1:6080/websockify;
