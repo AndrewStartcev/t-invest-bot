@@ -314,7 +314,7 @@ class ExtensionStore:
                 "history": self.history_progress(expected_profile),
                 "history_truncated": current.get("history_truncated", False)}
 
-    def accept(self, report, expected_profile, emit=None, alert=None):
+    def accept(self, report, expected_profile, emit=None, alert=None, delivery_context=None):
         """Validate complete deltas, atomically commit watermarks, then notify.
 
         Missing history is an error, not a reason to advance counters.
@@ -425,6 +425,7 @@ class ExtensionStore:
                         (profile_url + "|" + key + "|" + str(next_sequence)).encode()
                     ).hexdigest()
                     queue.append({"id": stable_id, "trade": event, "profile_url": profile_url,
+                                  "context": delivery_context if isinstance(delivery_context, dict) else {},
                                   "status": "pending", "created_at": iso_now()})
                 if len([item for item in queue if item.get("status") != "done"]) > 2000:
                     raise ValueError("Очередь сигналов заполнена; счётчики не обновлены")
@@ -511,6 +512,7 @@ class ExtensionStore:
                 self._save(data)
                 trade = dict(pending["trade"])
                 trade["_source_key"] = source_id
+                trade["_delivery_context"] = pending.get("context", {})
             try:
                 callback(trade)
             except Exception:
