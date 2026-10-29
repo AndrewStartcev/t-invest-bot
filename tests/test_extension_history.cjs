@@ -93,7 +93,7 @@ async function runCycle(doneList, published=1) {
   const monthly=reports.find(row=>row.kind==="month_history");
   assert(monthly,"a month-history batch must be sent independently");
   assert.equal(monthly.batch_index,0);
-  assert.equal(monthly.complete,true);
+  assert.equal(monthly.complete,published<=200);
   assert.equal(monthly.events.length,Math.min(200,published));
   const monthlyReports=reports.filter(row=>row.kind==="month_history");
   assert.equal(monthlyReports.length,Math.ceil(published/200));
