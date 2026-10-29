@@ -1246,9 +1246,9 @@ def monitor_loop() -> None:
     schedule_was_open = False
     next_extension_tick = 0.0
     while True:
-        if time.monotonic() >= next_extension_tick:
+        if time.time() >= next_extension_tick:
             EXTENSION_SOURCE.tick(alert=extension_alert)
-            next_extension_tick = time.monotonic() + 5
+            next_extension_tick = time.time() + 5
         settings = load_settings()
         if scheduled_pause(settings):
             schedule_was_open = False
@@ -1481,9 +1481,9 @@ def remote_monitor_loop() -> None:
     schedule_was_open = False
     next_extension_tick = 0.0
     while True:
-        if time.monotonic() >= next_extension_tick:
+        if time.time() >= next_extension_tick:
             EXTENSION_SOURCE.tick(alert=extension_alert)
-            next_extension_tick = time.monotonic() + 5
+            next_extension_tick = time.time() + 5
         settings = load_settings()
         if scheduled_pause(settings):
             schedule_was_open = False
