@@ -1778,8 +1778,7 @@ class Handler(BaseHTTPRequestHandler):
         # Legacy browser actions are unavailable in extension-source mode.
         # They must never create a Playwright session or an unprocessed queue.
         if self.path in {"/api/auth/start", "/api/auth/check", "/api/browser/show",
-                         "/api/source/refresh", "/api/month", "/api/history",
-                         "/source-admin/api/start"}:
+                         "/api/source/refresh", "/api/month", "/api/history"}:
             denied = shared_source() and self.path in {
                 "/api/auth/start", "/api/auth/check", "/api/browser/show"}
             self.respond(403 if denied else 409, {
@@ -1826,6 +1825,9 @@ class Handler(BaseHTTPRequestHandler):
         if self.path.startswith("/source-admin"):
             if not self.source_authorized():
                 self.respond(403, {"error": "Доступ только владельцу источника"})
+                return
+            if self.path in owner_routes:
+                self.respond(409, {"error": "Серверный Пульс отключён; используйте расширение Brave."})
                 return
             if self.path not in owner_routes:
                 self.respond(404, {"error": "Не найдено"})
