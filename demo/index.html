@@ -541,12 +541,17 @@
       const items=monthView?(month.status==='ready'?month.items:[]):today;
       el('trades-heading').textContent=monthView?'Сделки автора за 30 дней':'Сделки автора за 24 часа';
       el('month-button').textContent=monthView?'Вернуться к 24 часам':'Посмотреть за месяц';
-      el('today-count').textContent=monthView&&month.status==='loading'?'Загрузка…':items.length+' сделок';
+      const scanning=extensionMode && latestPulseState?.history_progress &&
+        !latestPulseState.history_progress.complete;
+      el('today-count').textContent=monthView&&month.status==='loading'?'Загрузка…':
+        scanning ? (items.length?items.length+'+ сделок · загружаем':'Загрузка истории…'):
+        items.length+' сделок';
       const monthMessage=el('month-message');monthMessage.className=month.status==='error'||month.skipped?.length?'toast error space-top':'toast space-top';
       const history=latestPulseState?.history_progress||{};
       const progress=Number(history.completed||0),target=Number(history.target_total||0);
       monthMessage.textContent=monthView?(month.status==='loading'?month.message||'Читаем историю за 30 дней…':month.status==='error'?month.message||'История не загрузилась':month.status==='ready'?(month.skipped?.length?`${month.message}. Пропущены: ${month.skipped.slice(0,5).join(', ')}${month.skipped.length>5?' и другие':''}.`:'Загружено за последние 30 дней · только сделки не старше 24 часов можно повторить'):'Месячная история не загружена; вернись к 24 часам и открой её снова')
-        :extensionMode?(history.complete?'История за последние 24 часа проверена · '+progress+' инструментов.'
+        :extensionMode?(latestPulseState?.extension_trades?.history_truncated?'История очень большая: показана только часть операций.'
+          :history.complete?'История за последние 24 часа проверена · '+progress+' инструментов.'
           :'Загружаем историю за 24 часа через Brave: проверено '+progress+' из '+target+' инструментов. Найденные сделки отображаются по мере загрузки.'):'';
 
       if(!items.length){box.className='empty';box.textContent=monthView?(month.status==='ready'?(month.skipped?.length?'Доступных сделок за 30 дней не найдено; часть инструментов пропущена':'За последние 30 дней опубликованных сделок не найдено'):month.status==='error'?'Загрузка не удалась. Вернись к 24 часам и нажми «Посмотреть за месяц» ещё раз.':'Загружаем сделки автора за 30 дней…'):(extensionMode&&!history.complete?'Идёт загрузка истории через Brave. Доступные сделки появятся здесь по мере получения.':'За последние 24 часа опубликованных сделок не найдено');return;}
@@ -907,7 +912,9 @@
       el('author-profile-link').href=state.settings.profile_url;
       const buys=today.filter(item=>item.action==='buy').length,sells=today.filter(item=>item.action==='sell').length;
       const demos=events.filter(item=>item.trade==='ДЕМО: куплено'||item.trade==='ДЕМО: продано');
-      el('source-buys').textContent=state.auth.status==='authenticated'?buys:'—';el('source-sells').textContent=state.auth.status==='authenticated'?sells:'—';el('our-buys').textContent=realMode==='off'?demos.filter(item=>item.side==='buy').length:(state.real_order_count||0);
+      const partialHistory=extensionMode&&!state.history_progress?.complete;
+      el('source-buys').textContent=state.auth.status==='authenticated'?(partialHistory?(buys?buys+'+':'…'):buys):'—';
+      el('source-sells').textContent=state.auth.status==='authenticated'?(partialHistory?(sells?sells+'+':'…'):sells):'—';el('our-buys').textContent=realMode==='off'?demos.filter(item=>item.side==='buy').length:(state.real_order_count||0);
       el('bot-activity-label').textContent=realMode==='off'?'Покупки в симуляции':'Брокерские заявки';
       el('bot-activity-note').textContent=realMode==='off'?'Условные операции бота':'Заявки этого кабинета';el('demo-total').textContent=demos.length;
       el('real-order-count').textContent=state.real_order_count||0;
