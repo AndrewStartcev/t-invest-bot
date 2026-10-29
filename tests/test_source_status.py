@@ -7,6 +7,7 @@ from contextlib import contextmanager
 from http.server import ThreadingHTTPServer
 from unittest.mock import patch
 from urllib.request import Request, urlopen
+from urllib.error import HTTPError
 
 import demo_admin
 
@@ -134,9 +135,9 @@ class SourceStatusTests(unittest.TestCase):
             for _ in range(2):
                 request = Request(base + "/api/source/refresh", data=b"{}",
                                   headers={"Content-Type": "application/json"})
-                with urlopen(request, timeout=2) as response:
-                    self.assertEqual(response.status, 202)
-            self.assertEqual(requests.get_nowait(), {"action": "source_refresh"})
+                with self.assertRaises(HTTPError) as response:
+                    urlopen(request, timeout=2)
+                self.assertEqual(409, response.exception.code)
             self.assertTrue(requests.empty())
             self.assertEqual(demo_admin.AUTH["status"], "required")
 
