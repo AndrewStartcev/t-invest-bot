@@ -24,6 +24,7 @@ from broker_trade import TradeError, full_access_accounts, order_state, prepare_
 from telegram_notify import NotificationError, send_notification
 from pulse_auth_monitor import PulseAuthStore
 from extension_source import ExtensionStore
+from extension_portfolio import ExtensionPortfolioStore
 from extension_archive import ZIP_NAME, extension_zip
 from server_config import public_origin, server_mode, shared_source, source_key, validate_source_config
 from pulse_live import PulseBrowser, PulseError, canonical_profile_url, operations_url
@@ -41,6 +42,7 @@ ROOT = Path(__file__).resolve().parent
 DATA_DIR = Path(os.environ.get("TINVEST_DATA_DIR", str(ROOT / ".local"))).expanduser().resolve()
 EXTENSION_SOURCE = PulseAuthStore(DATA_DIR)
 EXTENSION_TRADES = ExtensionStore(DATA_DIR)
+EXTENSION_PORTFOLIO = ExtensionPortfolioStore(DATA_DIR)
 SETTINGS_PATH = DATA_DIR / "demo-settings.json"
 STATE_PATH = DATA_DIR / "pulse-live-state.json"
 EVENTS_PATH = DATA_DIR / "events.json"
@@ -1782,8 +1784,7 @@ class Handler(BaseHTTPRequestHandler):
                 dashboard = extension_dashboard()
                 authenticated = dashboard["auth"]["status"] == "authenticated"
                 self.respond(200, {"approvals": APPROVALS.public(), "asset_consents": list(APPROVALS.consents),
-                                   "investor_portfolio": portfolio_unavailable(
-                                       load_settings()["profile_url"], "Портфель через расширение пока не передаётся"),
+                                   "investor_portfolio": EXTENSION_PORTFOLIO.public_snapshot(load_settings()["profile_url"]),
                                    "settings": load_settings(), "extension_mode": True,
                                    "extension_source": EXTENSION_SOURCE.public_status(),
                                    "extension_trades": EXTENSION_TRADES.public_snapshot(load_settings()["profile_url"]),
@@ -1823,7 +1824,14 @@ class Handler(BaseHTTPRequestHandler):
                     current = EXTENSION_TRADES.accept({"status":"test"}, load_settings()["profile_url"])
                     self.respond(200, current)
                     return
-                if report.get("kind") == "month_history":
+                if report.get("kind") == "portfolio":
+                    settings = load_settings()
+                    snapshot = EXTENSION_TRADES.public_snapshot(settings["profile_url"])
+                    if snapshot.get("last_status") != "ok" or not snapshot.get("instruments"):
+                        raise ValueError("Сначала дождись подтверждённого списка инструментов автора")
+                    result = EXTENSION_PORTFOLIO.accept(report, settings["profile_url"],
+                                                        snapshot["instruments"])
+                elif report.get("kind") == "month_history":
                     result = EXTENSION_TRADES.accept_month_history(report, load_settings()["profile_url"])
                 elif report.get("kind") == "history":
                     result = EXTENSION_TRADES.accept_history(report, load_settings()["profile_url"])
