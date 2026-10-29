@@ -657,8 +657,8 @@
       return {label:state.settings.monitoring_enabled?'Мониторинг включён':'Данные Пульса загружены',detail:m.message||a.message};
     }
     function journalGroups(items){
-      const pulse=items.filter(item=>['pulse_error','pulse_status'].includes(item.source));
-      const trades=items.filter(item=>!['pulse_error','pulse_status','telegram_test'].includes(item.source));
+      const pulse=items.filter(item=>['pulse_error','pulse_status','extension_status'].includes(item.source));
+      const trades=items.filter(item=>!['pulse_error','pulse_status','extension_status','telegram_test'].includes(item.source));
       const telegram=items.filter(item=>item.source==='telegram_test'||(item.notification&&item.notification!=='—'&&!['pulse_error','pulse_status'].includes(item.source)));
       return {pulse,trades,telegram};
     }
