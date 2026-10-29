@@ -506,9 +506,12 @@ def extension_record_trade(trade):
              "trade": "Расширение: " + ("покупка" if trade["action"] == "buy" else "продажа"),
              "reason": "Данные из авторизованного браузера клиента"}
     if settings.get("real_mode") != "off":
-        if not extension_live_source_ready(settings):
+        capture = trade.get("_delivery_context", {})
+        if (not extension_live_source_ready(settings)
+                or capture.get("settings_hash") != fingerprint(settings)
+                or capture.get("live_enabled") is not True):
             event.update(real_status="blocked", trade="РЕАЛЬНО: источник не подтверждён",
-                         reason="Требуется отдельное разрешение, свежие данные автора и портфеля")
+                         reason="Требуется явное разрешение в момент получения сигнала, свежие данные автора и портфеля")
         else:
             portfolio = EXTENSION_PORTFOLIO.public_snapshot(settings["profile_url"])
             position = portfolio["positions"].get(
@@ -1975,7 +1978,13 @@ class Handler(BaseHTTPRequestHandler):
                 elif report.get("kind") == "trades":
                     # Watermarks and new intents are committed together.
                     # Side effects are processed later from the durable outbox.
-                    result = EXTENSION_TRADES.accept(report, load_settings()["profile_url"])
+                    settings = load_settings()
+                    result = EXTENSION_TRADES.accept(
+                        report, settings["profile_url"],
+                        delivery_context={
+                            "settings_hash": fingerprint(settings),
+                            "live_enabled": settings.get("extension_live_enabled") is True
+                        })
                     if report.get("status") == "ok":
                         EXTENSION_SOURCE.accept_auth({"kind":"auth_status","status":"authenticated"},
                                                       alert=extension_alert)
