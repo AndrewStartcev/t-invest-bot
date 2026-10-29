@@ -7,6 +7,7 @@ const BACKEND_ORIGINS = new Set(["https://invest.argokov.ru", "http://127.0.0.1:
 const PULSE_HOSTS = new Set(["www.tbank.ru", "tbank.ru", "www.tbank-online.com", "tbank-online.com"]);
 const observed = new Map();
 const nicknames = new Map();
+const safeHeaders = new Map();
 
 function bankTab(sender) {
   if (!sender.tab?.id || !sender.tab.url) return false;
@@ -47,6 +48,23 @@ async function sendReport(report) {
   return result;
 }
 
+// Copy only non-secret application metadata used by the banking site.
+const HEADER_ALLOWLIST = new Set(["x-app-name","x-app-version","x-platform"]);
+chrome.webRequest.onBeforeSendHeaders.addListener(async details => {
+  if (details.tabId < 0) return;
+  const path = new URL(details.url).pathname;
+  if (!/\/social\/v1\/profile\/[^/]+\/instrument\/?$/.test(path)) return;
+  const headers = {};
+  for (const entry of details.requestHeaders || []) {
+    if (HEADER_ALLOWLIST.has(entry.name.toLowerCase()) && typeof entry.value === "string")
+      headers[entry.name] = entry.value;
+  }
+  safeHeaders.set(details.tabId, headers);
+  await chrome.storage.session.set({["headers_tab_" + details.tabId]:headers});
+  chrome.tabs.sendMessage(details.tabId,{kind:"safe_headers",headers}).catch(()=>{});
+}, {urls:["https://*.tbank.ru/mybank/api/*","https://*.tbank-online.com/mybank/api/*"]},
+   ["requestHeaders","extraHeaders"]);
+
 chrome.webRequest.onCompleted.addListener(async details => {
   if (details.tabId < 0) return;
   let url;
@@ -69,7 +87,9 @@ chrome.webRequest.onCompleted.addListener(async details => {
 chrome.tabs.onRemoved.addListener(tabId => {
   observed.delete(tabId);
   nicknames.delete(tabId);
-  chrome.storage.session.remove(["instrument_tab_" + tabId, "nickname_tab_" + tabId]).catch(() => {});
+  safeHeaders.delete(tabId);
+  chrome.storage.session.remove(["instrument_tab_" + tabId, "nickname_tab_" + tabId,
+                                 "headers_tab_" + tabId]).catch(() => {});
 });
 
 chrome.runtime.onMessage.addListener((message, sender, reply) => {
@@ -78,9 +98,11 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
       if (!bankTab(sender)) throw Error("Нужна вкладка с опубликованными сделками Пульса");
       const key = "instrument_tab_" + sender.tab.id;
       const nick = "nickname_tab_" + sender.tab.id;
-      const saved = await chrome.storage.session.get([key, nick]);
+      const headers = "headers_tab_" + sender.tab.id;
+      const saved = await chrome.storage.session.get([key, nick, headers]);
       return {url: observed.get(sender.tab.id) || saved[key] || null,
-              nickname_url: nicknames.get(sender.tab.id) || saved[nick] || null};
+              nickname_url: nicknames.get(sender.tab.id) || saved[nick] || null,
+              headers: safeHeaders.get(sender.tab.id) || saved[headers] || {}};
     }
     if (message?.kind === "report") {
       if (!bankTab(sender)) throw Error("Запрос разрешён только со страницы Пульса");
