@@ -104,7 +104,10 @@
     const base = new URL(instrumentUrl);
     base.pathname = base.pathname.replace(/\/instrument\/?$/, "/operation/instrument/" +
       encodeURIComponent(ticker) + "/" + encodeURIComponent(code));
-    base.search = "";
+    // Keep the bank's original sessionId and other required API query
+    // parameters inside Brave; only the paging cursors are reset.
+    base.searchParams.delete("nextCursor");
+    base.searchParams.delete("cursor");
     let cursor = null, result = [];
     const seen = new Set();
     for (let pageNum=0; pageNum<100 && result.length<required; pageNum++) {
@@ -131,7 +134,10 @@
     const base = new URL(instrumentUrl);
     base.pathname = base.pathname.replace(/\/instrument\/?$/, "/operation/instrument/" +
       encodeURIComponent(ticker) + "/" + encodeURIComponent(code));
-    base.search = "";
+    // Keep the bank's original sessionId and other required API query
+    // parameters inside Brave; only the paging cursors are reset.
+    base.searchParams.delete("nextCursor");
+    base.searchParams.delete("cursor");
     const found = [];
     const seen = new Set();
     const cutoff = Date.now() - HISTORY_HORIZON_MS;
