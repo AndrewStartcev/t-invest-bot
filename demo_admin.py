@@ -1725,8 +1725,8 @@ class Handler(BaseHTTPRequestHandler):
                 dashboard = extension_dashboard()
                 authenticated = dashboard["auth"]["status"] == "authenticated"
                 self.respond(200, {"approvals": APPROVALS.public(), "asset_consents": list(APPROVALS.consents),
-                                   "investor_portfolio": (INVESTOR_PORTFOLIO.copy() if authenticated and INVESTOR_PORTFOLIO.get("profile_url") == load_settings()["profile_url"]
-                                                          else portfolio_unavailable(load_settings()["profile_url"], "Портфель выбранного автора ещё не проверен")),
+                                   "investor_portfolio": portfolio_unavailable(
+                                       load_settings()["profile_url"], "Портфель через расширение пока не передаётся"),
                                    "settings": load_settings(), "extension_mode": True,
                                    "extension_source": EXTENSION_SOURCE.public_status(),
                                    "extension_trades": EXTENSION_TRADES.public_snapshot(load_settings()["profile_url"]),
