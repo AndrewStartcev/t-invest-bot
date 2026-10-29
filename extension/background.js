@@ -6,6 +6,7 @@
 const BACKEND_ORIGINS = new Set(["https://invest.argokov.ru", "http://127.0.0.1:8765", "http://localhost:8765"]);
 const PULSE_HOSTS = new Set(["www.tbank.ru", "tbank.ru", "www.tbank-online.com", "tbank-online.com"]);
 const observed = new Map();
+const nicknames = new Map();
 
 function bankTab(sender) {
   if (!sender.tab?.id || !sender.tab.url) return false;
@@ -50,16 +51,25 @@ chrome.webRequest.onCompleted.addListener(async details => {
   if (details.tabId < 0) return;
   let url;
   try { url = new URL(details.url); } catch { return; }
-  if (!/\/social\/v1\/profile\/[^/]+\/instrument\/?$/.test(url.pathname)) return;
   if (!PULSE_HOSTS.has(url.hostname)) return;
-  observed.set(details.tabId, details.url);
-  await chrome.storage.session.set({["instrument_tab_" + details.tabId]: details.url});
-  chrome.tabs.sendMessage(details.tabId, {kind: "instrument_url", url: details.url}).catch(() => {});
+  if (/\/social\/v1\/profile\/nickname\/[^/]+\/?$/.test(url.pathname)) {
+    nicknames.set(details.tabId, details.url);
+    await chrome.storage.session.set({["nickname_tab_" + details.tabId]: details.url});
+    chrome.tabs.sendMessage(details.tabId, {kind: "nickname_url", url: details.url}).catch(() => {});
+    return;
+  }
+  if (!/\/social\/v1\/profile\/[^/]+\/instrument\/?$/.test(url.pathname)) return;
+  // A paginated request may complete last; never start the next cycle mid-list.
+  url.searchParams.delete("nextCursor");
+  observed.set(details.tabId, url.href);
+  await chrome.storage.session.set({["instrument_tab_" + details.tabId]: url.href});
+  chrome.tabs.sendMessage(details.tabId, {kind: "instrument_url", url: url.href}).catch(() => {});
 }, {urls: ["https://*.tbank.ru/mybank/api/*", "https://*.tbank-online.com/mybank/api/*"]});
 
 chrome.tabs.onRemoved.addListener(tabId => {
   observed.delete(tabId);
-  chrome.storage.session.remove("instrument_tab_" + tabId).catch(() => {});
+  nicknames.delete(tabId);
+  chrome.storage.session.remove(["instrument_tab_" + tabId, "nickname_tab_" + tabId]).catch(() => {});
 });
 
 chrome.runtime.onMessage.addListener((message, sender, reply) => {
@@ -67,8 +77,10 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
     if (message?.kind === "get_instrument_url") {
       if (!bankTab(sender)) throw Error("Нужна вкладка с опубликованными сделками Пульса");
       const key = "instrument_tab_" + sender.tab.id;
-      const saved = await chrome.storage.session.get(key);
-      return {url: observed.get(sender.tab.id) || saved[key] || null};
+      const nick = "nickname_tab_" + sender.tab.id;
+      const saved = await chrome.storage.session.get([key, nick]);
+      return {url: observed.get(sender.tab.id) || saved[key] || null,
+              nickname_url: nicknames.get(sender.tab.id) || saved[nick] || null};
     }
     if (message?.kind === "report") {
       if (!bankTab(sender)) throw Error("Запрос разрешён только со страницы Пульса");
