@@ -113,6 +113,86 @@ class ExtensionHistoryTests(unittest.TestCase):
                 "ticker":"FAKE","classCode":"TQBR","events":[]},PROFILE)
         self.assertEqual([],self.store.history_progress(PROFILE)["done"])
 
+    def test_month_page_ingestion_is_resumable_and_read_only(self):
+        now = datetime.now(timezone.utc)
+        recent = (now - timedelta(hours=2)).isoformat()
+        older = (now - timedelta(days=12)).isoformat()
+        instruments = [{"ticker":"BSPB","classCode":"TQBR",
+                        "totalOperationsCount":5,"maxTradeDateTime":recent}]
+        self.store.accept({"status":"ok","profile_url":PROFILE,
+            "instruments":instruments,"events":[]}, PROFILE)
+        first = {"ticker":"BSPB","classCode":"TQBR","action":"buy",
+                 "tradeDateTime":older,"averagePrice":"101"}
+        second = {**first, "tradeDateTime":recent, "action":"sell"}
+        report={"kind":"month_history","profile_url":PROFILE,
+                "ticker":"BSPB","classCode":"TQBR",
+                "batch_index":0,"events":[second],"complete":False}
+        result=self.store.accept_month_history(report,PROFILE)
+        self.assertEqual(1,result["accepted"])
+        self.assertFalse(result["complete"])
+        self.assertEqual({"BSPB:TQBR":1},self.store.month_progress(PROFILE)["offsets"])
+        self.assertEqual(0,self.store.month_progress(PROFILE)["completed"])
+        self.assertEqual(0,self.store.accept_month_history(report,PROFILE)["accepted"])
+        with self.assertRaisesRegex(ValueError,"Пропущена"):
+            self.store.accept_month_history({**report,"batch_index":2},PROFILE)
+        self.assertEqual(1,self.store.accept_month_history(
+            {**report,"batch_index":1,"events":[first],"complete":True},
+            PROFILE)["accepted"])
+        progress=self.store.month_progress(PROFILE)
+        self.assertTrue(progress["complete"])
+        self.assertEqual(2,progress["loaded"])
+        self.assertEqual(["BSPB:TQBR"],progress["done"])
+        self.assertEqual(0,self.store.accept_month_history(
+            {**report,"batch_index":1,"events":[first],"complete":True},PROFILE)["accepted"])
+        self.assertEqual(2,len(self.store.month_entries(PROFILE)))
+
+    def test_month_history_isolated_by_author_and_time(self):
+        now=datetime.now(timezone.utc)
+        self.store.accept({"status":"ok","profile_url":PROFILE,"events":[],
+            "instruments":[{"ticker":"BSPB","classCode":"TQBR",
+                             "totalOperationsCount":5,"maxTradeDateTime":now.isoformat()}]},PROFILE)
+        stale=(now-timedelta(days=33)).isoformat()
+        sample={"ticker":"BSPB","classCode":"TQBR","action":"buy",
+                "tradeDateTime":stale,"averagePrice":"123"}
+        packet={"kind":"month_history","profile_url":PROFILE,
+                "ticker":"BSPB","classCode":"TQBR",
+                "batch_index":0,"events":[sample],"complete":True}
+        with self.assertRaisesRegex(ValueError,"вне месячной"):
+            self.store.accept_month_history(packet,PROFILE)
+        self.assertEqual([],self.store.month_entries(PROFILE))
+        with self.assertRaisesRegex(ValueError,"другого автора"):
+            self.store.accept_month_history({**packet,"profile_url":
+                PROFILE.replace("LinMath","Different")},PROFILE)
+        self.store.accept_month_history({**packet,"events":[]},PROFILE)
+        new=PROFILE.replace("LinMath","Different")
+        self.store.accept({"status":"ok","profile_url":new,"events":[],
+            "instruments":[{"ticker":"BSPB","classCode":"TQBR",
+                             "totalOperationsCount":5}]},new)
+        self.assertEqual([],self.store.month_progress(new)["done"])
+        self.assertEqual([],self.store.month_entries(new))
+
+    def test_month_history_visible_in_cabinet_but_not_24h(self):
+        now=datetime.now(timezone.utc)
+        old=(now-timedelta(days=7)).isoformat()
+        self.store.accept({"status":"ok","profile_url":PROFILE,"events":[],
+            "instruments":[{"ticker":"BSPB","classCode":"TQBR",
+                             "totalOperationsCount":5,"maxTradeDateTime":old}]},PROFILE)
+        packet={"kind":"month_history","profile_url":PROFILE,
+                "ticker":"BSPB","classCode":"TQBR","batch_index":0,"complete":True,
+                "events":[{"ticker":"BSPB","classCode":"TQBR","action":"buy",
+                            "tradeDateTime":old,"averagePrice":"100"}]}
+        with patch.object(demo_admin,"EXTENSION_TRADES",self.store), \
+             patch.object(demo_admin,"load_settings",return_value={
+                 **demo_admin.DEFAULTS,"profile_url":PROFILE}), \
+             patch.object(demo_admin,"extension_record_trade") as broker:
+            self.store.accept_month_history(packet,PROFILE)
+            result=demo_admin.extension_dashboard()
+            self.assertEqual([],result["today"])
+            self.assertEqual(1,len(result["month"]["items"]))
+            self.assertEqual("ready",result["month"]["status"])
+            self.assertTrue(result["month"]["items"][0]["can_demo_buy"] is False)
+            broker.assert_not_called()
+
     def test_author_switch_resets_backfill_state(self):
         now=datetime.now(timezone.utc).isoformat()
         self.store.accept({"status":"ok","profile_url":PROFILE,
