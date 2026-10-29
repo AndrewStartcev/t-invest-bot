@@ -76,11 +76,11 @@ class ExtensionPortfolioTests(unittest.TestCase):
     def test_authenticated_api_reports_portfolio_in_client_dashboard(self):
         self.trades.accept({"status":"ok","profile_url":PROFILE,
                             "instruments":INSTRUMENTS,"events":[]},PROFILE)
-        with patch.object(demo_admin,"EXTENSION_TRADES",self.trades), \\
-             patch.object(demo_admin,"EXTENSION_SOURCE",self.auth), \\
-             patch.object(demo_admin,"EXTENSION_PORTFOLIO",self.portfolio), \\
+        with patch.object(demo_admin,"EXTENSION_TRADES",self.trades), \
+             patch.object(demo_admin,"EXTENSION_SOURCE",self.auth), \
+             patch.object(demo_admin,"EXTENSION_PORTFOLIO",self.portfolio), \
              patch.object(demo_admin,"load_settings",
-                          return_value={**demo_admin.DEFAULTS,"profile_url":PROFILE}), \\
+                          return_value={**demo_admin.DEFAULTS,"profile_url":PROFILE}), \
              patch.dict(os.environ,{"TINVEST_BACKEND_KEY":"","TINVEST_MULTIUSER":"0"}):
             server=ThreadingHTTPServer(("127.0.0.1",0),demo_admin.Handler)
             thread=threading.Thread(target=server.serve_forever,daemon=True)
