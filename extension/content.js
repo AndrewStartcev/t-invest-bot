@@ -11,6 +11,7 @@
   let instrumentUrl = null, nicknameUrl = null, busy = false, lastProfileCheck = 0, lastIdentityCheck = 0, previousStart = 0;
   let consecutiveFailures = 0;
   let safeHeaders = {};
+  let activeProfileUrl = null;
   const mountedAt = Date.now();
 
   function selectedNickname(urlString) {
@@ -168,9 +169,13 @@
     if (busy) return;
     busy = true;
     try {
-      const cfg = await chrome.storage.local.get(["enabled", "profile_url", "baselines", "interval"]);
+      const cfg = await chrome.storage.local.get(["enabled", "baselines", "interval"]);
       const interval = cfg.interval === 3 ? 3000 : 5000;
-      if (!cfg.enabled || !operationsTab() || selectedNickname(cfg.profile_url) !== selectedNickname(location.href)) return interval;
+      if (!cfg.enabled || !operationsTab()) return interval;
+      const selected = await request({kind:"config"});
+      activeProfileUrl = selected.profile_url;
+      // The cabinet determines the author; never scan a different open bank tab.
+      if (selectedNickname(activeProfileUrl) !== selectedNickname(location.href)) return interval;
       if (!instrumentUrl || !nicknameUrl) {
         const result = await request({kind:"get_instrument_url"});
         instrumentUrl = result.url;
@@ -179,12 +184,12 @@
       }
       if (!instrumentUrl || !nicknameUrl) {
         if (Date.now()-mountedAt > 20000)
-          await request({kind:"report", report:{status:"unavailable",profile_url:cfg.profile_url,
+          await request({kind:"report", report:{status:"unavailable",profile_url:activeProfileUrl,
             error:"Не найден запрос списка инструментов. Открой Сделки и обнови вкладку F5."}});
         return interval;
       }
       if (document.hidden && elapsed > 15000) {
-        await request({kind:"report",report:{status:"background_throttled",profile_url:cfg.profile_url,
+        await request({kind:"report",report:{status:"background_throttled",profile_url:activeProfileUrl,
           error:"Вкладка находится в фоне; браузер замедляет интервалы."}});
       }
       await verifyAuthor();
@@ -192,7 +197,7 @@
       const list = await instruments();
       const baselines = cfg.baselines || {};
       const profileId = new URL(instrumentUrl).pathname.match(/\/profile\/([^/]+)\/instrument/)[1];
-      const saved = baselines[profileId] || {};
+      const saved = selected.reset_baseline ? {} : (baselines[profileId] || {});
       const next = {...saved};
       let totalDelta = 0;
       const changed = [];
@@ -209,17 +214,17 @@
         next[id]=value;
       }
       const result = await request({kind:"report",report:{
-        status:"ok",profile_url:cfg.profile_url,instruments:list,events:changed}});
+        status:"ok",profile_url:activeProfileUrl,instruments:list,events:changed}});
       if (!result?.ok) throw Error("Сервер не подтвердил сохранение");
       await chrome.storage.local.set({baselines:{...baselines,[profileId]:next}});
       consecutiveFailures = 0;
       return interval;
     } catch (error) {
       consecutiveFailures++;
-      const cfg = await chrome.storage.local.get(["profile_url","enabled"]);
-      if (cfg.enabled && selectedNickname(cfg.profile_url) === selectedNickname(location.href)) {
+      const cfg = await chrome.storage.local.get("enabled");
+      if (cfg.enabled && activeProfileUrl && selectedNickname(activeProfileUrl) === selectedNickname(location.href)) {
         try { await request({kind:"report",report:{
-          status:errorStatus(error),profile_url:cfg.profile_url,error:String(error.message).slice(0,180)}}); }
+          status:errorStatus(error),profile_url:activeProfileUrl,error:String(error.message).slice(0,180)}}); }
         catch { /* The server will alert on the missing heartbeat. */ }
       }
       return Math.min(60000, consecutiveFailures >= 3 ? 30000 : 5000);
