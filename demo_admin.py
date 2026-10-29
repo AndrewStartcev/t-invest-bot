@@ -61,6 +61,7 @@ DEFAULTS = {
     "monitoring_enabled": False,
     "auto_demo_buy": False,
     "real_mode": "off",
+    "extension_live_enabled": False,
     "rules": DEFAULT_RULES,
     "schedule": DEFAULT_SCHEDULE,
     "policy": DEFAULT_POLICY,
@@ -311,6 +312,9 @@ def save_settings(data: dict) -> dict:
     if auto_buy and not enabled:
         raise ValueError("Для автокопирования включи мониторинг")
     real_mode = data.get("real_mode", "off")
+    extension_live_enabled = data.get("extension_live_enabled", False)
+    if type(extension_live_enabled) is not bool:
+        raise ValueError("Некорректное разрешение реальных сделок через расширение")
     if real_mode not in {"off", "confirm", "auto"}:
         raise ValueError("Неизвестный режим реальной торговли")
     if real_mode != "off" and (not enabled or auto_buy):
@@ -326,6 +330,7 @@ def save_settings(data: dict) -> dict:
         save_telegram_token(data["telegram_token"])
     settings = {"profile_url": url, "poll_seconds": seconds, "chat_id": chat_id, "paused": paused,
                 "monitoring_enabled": enabled, "auto_demo_buy": auto_buy, "real_mode": real_mode,
+                "extension_live_enabled": extension_live_enabled,
                 "rules": rules, "schedule": schedule, "policy": policy}
     SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
     temp = SETTINGS_PATH.with_suffix(".tmp")
@@ -442,6 +447,43 @@ def extension_alert(kind, message):
     add_event(event)
 
 
+def extension_live_source_ready(settings):
+    """Fail closed unless the *selected* author has a fresh browser report."""
+    if not settings.get("extension_live_enabled"):
+        return False
+    if not settings.get("monitoring_enabled") or not schedule_open(settings):
+        return False
+    source = EXTENSION_TRADES.public_snapshot(settings["profile_url"])
+    if source.get("last_status") != "ok" or not source.get("active"):
+        return False
+    if not source.get("last_report"):
+        return False
+    try:
+        last = datetime.fromisoformat(source["last_report"])
+        if last.tzinfo is None or (datetime.now(timezone.utc) - last).total_seconds() > 45:
+            return False
+    except (ValueError, TypeError):
+        return False
+    # Never accept an unseen or stale author portfolio to waive holdings policy.
+    portfolio = EXTENSION_PORTFOLIO.public_snapshot(settings["profile_url"])
+    if portfolio.get("status") != "partial":
+        return False
+    try:
+        checked = datetime.fromisoformat(portfolio["checked_at"])
+        if checked.tzinfo is None or (datetime.now(timezone.utc) - checked).total_seconds() > 300:
+            return False
+    except (ValueError, TypeError, KeyError):
+        return False
+    return True
+
+
+def pulse_or_legacy_authorized(settings):
+    # Preserves old test/legacy decisions while requiring explicit opt-in for
+    # all browser-fed real orders. Server Playwright is never started.
+    return (AUTH.get("status") == "authenticated"
+            or extension_live_source_ready(settings))
+
+
 def extension_record_trade(trade):
     """Use existing *paper* copy rules on new browser trades, never broker orders.
 
@@ -464,10 +506,56 @@ def extension_record_trade(trade):
              "trade": "Расширение: " + ("покупка" if trade["action"] == "buy" else "продажа"),
              "reason": "Данные из авторизованного браузера клиента"}
     if settings.get("real_mode") != "off":
-        # Do not interpret an existing 'auto' setting as permission to
-        # execute real orders through a newly introduced data source.
-        event.update(real_status="blocked", trade="РЕАЛЬНО: новый источник ещё не разрешён",
-                     reason="Для реальных заявок требуется отдельная проверка защиты от повторов")
+        if not extension_live_source_ready(settings):
+            event.update(real_status="blocked", trade="РЕАЛЬНО: источник не подтверждён",
+                         reason="Требуется отдельное разрешение, свежие данные автора и портфеля")
+        else:
+            portfolio = EXTENSION_PORTFOLIO.public_snapshot(settings["profile_url"])
+            position = portfolio["positions"].get(
+                trade["ticker"] + ":" + trade["classCode"], {"status": "unavailable"})
+            signal = {"ticker": trade["ticker"], "classCode": trade["classCode"],
+                      "name": (meta or {}).get("showName", trade["ticker"]),
+                      "asset_type": kind, "side": trade["action"],
+                      "price": trade["averagePrice"], "currency": "",
+                      "lot_size": 1 if kind in {"stock", "bond", "fund"} else None,
+                      "investor_position": position}
+            source_key = trade.get("_source_key")
+            try:
+                if not isinstance(source_key, str) or not source_key.startswith("pulse:"):
+                    raise TradeError("Источник сигнала не имеет подтверждённого идентификатора")
+                if kind not in {"stock", "bond", "fund", "future"}:
+                    raise TradeError("Тип инструмента не поддерживается")
+                if settings["real_mode"] == "confirm":
+                    reasons = approval_reasons(signal, settings["policy"])
+                    row = queue_approval(event, signal, settings, source_key,
+                                         reasons or ["Подтверждение реальной сделки через расширение"])
+                    event["notification"] = "ожидает решения"
+                    notify(event, settings, "Пульс · подтвердите реальную заявку: " +
+                           trade["ticker"] + " · " + "; ".join(row["reasons"]),
+                           urgent=True, keyboard=approval_keyboard(row))
+                else:
+                    reasons = approval_reasons(signal, settings["policy"])
+                    if reasons:
+                        row = queue_approval(event, signal, settings, source_key, reasons)
+                        event["notification"] = "ожидает решения"
+                        notify(event, settings, "Пульс · требуется решение: " +
+                               trade["ticker"] + " · " + "; ".join(reasons),
+                               urgent=True, keyboard=approval_keyboard(row))
+                    else:
+                        with TRADE_FLOW_LOCK:
+                            if not extension_live_source_ready(load_settings()):
+                                raise TradeError("Источник устарел до подготовки заявки")
+                            plan, token = prepare_real(signal, settings)
+                            if not extension_live_source_ready(load_settings()):
+                                raise TradeError("Источник устарел до отправки заявки")
+                            placed = place_real(plan, source_key, token)
+                        event.update(real_status=placed["status"],
+                                     trade="РЕАЛЬНО: заявка отправлена",
+                                     quantity=plan["quantity"],
+                                     amount_rub=plan["estimated_rub"])
+            except (TradeError, ValueError, OSError) as exc:
+                event.update(real_status="blocked", trade="РЕАЛЬНО: заявка заблокирована",
+                             reason=str(exc)[:180])
     elif settings.get("monitoring_enabled") and settings.get("auto_demo_buy") and schedule_open(settings):
         positions = EXTENSION_PORTFOLIO.public_snapshot(settings["profile_url"]).get("positions", {})
         signal = {"ticker": trade["ticker"], "classCode": trade["classCode"],
@@ -498,7 +586,7 @@ def extension_record_trade(trade):
             event.update(demo_status="blocked",trade="ДЕМО: пропущено",reason=str(exc)[:180])
     if settings.get("monitoring_enabled") and event.get("notification") != "ожидает решения":
         notify(event, settings, "Пульс · " + trade["ticker"] + " · " + event["trade"] +
-              ". " + event["reason"])
+              ". " + event.get("reason", ""))
     add_event(event)
 
 
@@ -606,7 +694,8 @@ def extension_watchdog_loop():
     while True:
         try:
             EXTENSION_SOURCE.tick(alert=extension_alert)
-        except (OSError, ValueError) as error:
+            EXTENSION_TRADES.drain_outbox(extension_record_trade)
+        except (OSError, ValueError, TradeError) as error:
             print("Пульс: ошибка проверки состояния расширения: " + type(error).__name__, flush=True)
         time.sleep(5)
 
@@ -688,7 +777,7 @@ def decide_approval(nonce, action):
                 if not settings["monitoring_enabled"] or not schedule_open(settings):
                     raise ValueError("Мониторинг выключен или сейчас вне расписания")
                 if row["mode"] == "real":
-                    if settings["real_mode"] == "off" or AUTH["status"] != "authenticated":
+                    if settings["real_mode"] == "off" or not pulse_or_legacy_authorized(settings):
                         raise ValueError("Торговля или источник отключены")
                     plan, token = prepare_real(row["signal"], settings)
                     if plan_identity(plan) != plan_identity(row["plan"]):
@@ -696,7 +785,7 @@ def decide_approval(nonce, action):
                     if (time.time() >= row["expires"] or fingerprint(load_settings()) != row["fingerprint"]
                             or token != trade_token()
                             or hashlib.sha256(token.encode()).hexdigest() != row["token_hash"]
-                            or not schedule_open(settings) or AUTH["status"] != "authenticated"):
+                            or not schedule_open(settings) or not pulse_or_legacy_authorized(settings)):
                         raise ValueError("Подтверждение, расписание или источник изменились во время расчёта")
                     order = place_real(plan, row["source_key"], token)
                     event.update(trade="РЕАЛЬНО: заявка отправлена", real_status=order["status"],
@@ -1880,8 +1969,9 @@ class Handler(BaseHTTPRequestHandler):
                 elif report.get("kind") == "history":
                     result = EXTENSION_TRADES.accept_history(report, load_settings()["profile_url"])
                 elif report.get("kind") == "trades":
-                    result = EXTENSION_TRADES.accept(report, load_settings()["profile_url"],
-                                                     emit=extension_record_trade)
+                    # Watermarks and new intents are committed together.
+                    # Side effects are processed later from the durable outbox.
+                    result = EXTENSION_TRADES.accept(report, load_settings()["profile_url"])
                     if report.get("status") == "ok":
                         EXTENSION_SOURCE.accept_auth({"kind":"auth_status","status":"authenticated"},
                                                       alert=extension_alert)
