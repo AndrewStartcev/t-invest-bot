@@ -853,7 +853,7 @@
       el('extension-status').textContent = statuses[extensionState.last_status] || 'Не подключено';
       el('extension-last').textContent = extensionState.last_report ? fmtDate(extensionState.last_report) : '—';
       el('extension-note').textContent = extensionState.last_error ||
-        'Проверка сессии каждые 2 минуты. Сделки расширение не читает. Ошибки серверного сбора отображаются отдельно.';
+        'Расширение проверяет вход в банк и передаёт опубликованные сделки в этот кабинет. Реальные заявки из расширения не исполняются.';
       const loginButton=el('extension-login');
       const profileLink = new URL(state.settings.profile_url);
       profileLink.pathname = profileLink.pathname.replace(
@@ -869,6 +869,8 @@
       el('profile-heading').textContent=profile+' · профиль Пульса';el('source-profile').textContent=profile;
       el('source-mode').textContent=extensionMode?'Источник: расширение Brave · только чтение':
          state.monitor.status==='scheduled'?'Ожидание расписания · МСК':realMode==='off'?(state.settings.monitoring_enabled?'Мониторинг включён':'Мониторинг выключен'):'Реальная торговля · '+(realMode==='auto'?'авто':'подтверждение');
+      el('month-button').hidden=extensionMode;
+      if(extensionMode)monthView=false;
       el('mode-badge').textContent=extensionMode?'Мониторинг через Brave · без заявок':
          state.monitor.status==='scheduled'?'Ожидание расписания · МСК':realMode==='off'?(state.settings.monitoring_enabled?'Мониторинг включён':'Мониторинг выключен'):'Реальные заявки · '+(realMode==='auto'?'авто':'подтверждение');
       el('trade-top-status').textContent=extensionMode?'Расширение: наблюдение без брокерских заявок':realMode==='off'?'Брокерские заявки отключены':'Реальная торговля включена';
