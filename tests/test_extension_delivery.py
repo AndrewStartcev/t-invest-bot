@@ -102,7 +102,8 @@ class BrowserLiveGuardTests(unittest.TestCase):
         self.settings["extension_live_enabled"]=True
         from trade_approvals import fingerprint
         self.trade["_delivery_context"]={"live_enabled":True,"settings_hash":fingerprint(self.settings)}
-        with patch.object(demo_admin,"EXTENSION_TRADES",self.trades), \
+        with patch.dict("os.environ", {"TINVEST_ALLOW_EXTENSION_REAL":"1"}), \
+             patch.object(demo_admin,"EXTENSION_TRADES",self.trades), \
              patch.object(demo_admin,"EXTENSION_PORTFOLIO",self.portfolio), \
              patch.object(demo_admin,"load_settings",return_value=self.settings), \
              patch.object(demo_admin,"queue_approval", return_value={
