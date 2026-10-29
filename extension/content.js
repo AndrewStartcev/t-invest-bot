@@ -218,6 +218,106 @@
     }
   }
 
+  // Monthly backfill is independent of both fast counters and 24-hour history.
+  // Browser-side cursors and sessionId never leave the user's browser.
+  const MONTH_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
+  const MONTH_BATCH_SIZE = 200;
+  const monthRetryAt = new Map();
+  let monthCurrentKey = null, monthCursor = null, monthBatch = 0;
+  let monthLastTrade = Infinity;
+  const monthSeenCursors = new Set();
+
+  async function backfillMonth(profileUrl, instruments, config) {
+    const complete = new Set(config.month_done || []);
+    const offsets = config.month_offsets || {};
+    const cutoff = Date.now() - MONTH_WINDOW_MS;
+    const targets = instruments.filter(item => {
+      if(item.totalOperationsCount <= 0) return false;
+      const key = item.ticker + ":" + item.classCode;
+      if(complete.has(key) || Date.now() < (monthRetryAt.get(key) || 0)) return false;
+      const rawDate = String(item.maxTradeDateTime || "");
+      const zoned = /(?:Z|[+-]\d{2}:\d{2})$/i.test(rawDate);
+      const last = zoned ? Date.parse(rawDate) : NaN;
+      return !Number.isFinite(last) || last >= cutoff;
+    }).sort((a,b) => {
+      const da = Date.parse(a.maxTradeDateTime || "") || 0;
+      const db = Date.parse(b.maxTradeDateTime || "") || 0;
+      return db - da;
+    });
+    if(!targets.length) return;
+    const item = targets[0], key = item.ticker + ":" + item.classCode;
+    if(monthCurrentKey !== key){
+      monthCurrentKey = key;
+      monthCursor = null;
+      monthBatch = 0;
+      monthLastTrade = Infinity;
+      monthSeenCursors.clear();
+    }
+    try{
+      const base = new URL(instrumentUrl);
+      base.pathname = base.pathname.replace(/\/instrument\/?$/,
+        "/operation/instrument/"+encodeURIComponent(item.ticker)+"/"+encodeURIComponent(item.classCode));
+      base.searchParams.delete("nextCursor");
+      base.searchParams.delete("cursor");
+      await setStage("История за 30 дней: "+item.ticker+" · пакет "+(monthBatch+1));
+      const page = await api(cursorUrl(base.href, monthCursor, "cursor"));
+      const found = [];
+      let reachedCutoff = false;
+      for(const trade of page.items){
+        const when = Date.parse(trade?.tradeDateTime);
+        if(!Number.isFinite(when) || when > monthLastTrade)
+          throw Error("Некорректная последовательность месячной истории: "+item.ticker);
+        if(when > Date.now()+5*60*1000)
+          throw Error("Время сделки в будущем: "+item.ticker);
+        monthLastTrade = when;
+        if(when < cutoff){
+          reachedCutoff = true;
+          continue;
+        }
+        found.push({ticker:item.ticker,classCode:item.classCode,
+          action:trade.action,tradeDateTime:trade.tradeDateTime,
+          averagePrice:trade.averagePrice});
+      }
+      const finished = reachedCutoff || !page.hasNext;
+      if(!finished){
+        if((typeof page.nextCursor !== "number" && typeof page.nextCursor !== "string") ||
+            monthSeenCursors.has(String(page.nextCursor)))
+          throw Error("Неверный курсор месячной истории "+item.ticker);
+      }
+      const batches = [];
+      for(let offset=0;offset<found.length;offset+=MONTH_BATCH_SIZE)
+        batches.push(found.slice(offset,offset+MONTH_BATCH_SIZE));
+      if(!batches.length) batches.push([]);
+      for(let i=0;i<batches.length;i++){
+        const last = i === batches.length-1;
+        await request({kind:"report",report:{
+          kind:"month_history",profile_url:profileUrl,
+          ticker:item.ticker,classCode:item.classCode,batch_index:monthBatch,
+          complete:finished && last,events:batches[i]
+        }});
+        monthBatch++;
+      }
+      if(finished){
+        monthCurrentKey = null;
+        monthCursor = null;
+        monthBatch = 0;
+        monthLastTrade = Infinity;
+        monthSeenCursors.clear();
+      }else{
+        monthSeenCursors.add(String(page.nextCursor));
+        monthCursor = page.nextCursor;
+      }
+      monthRetryAt.delete(key);
+    }catch(error){
+      // Never mark partial month history complete, or advance live counters.
+      monthRetryAt.set(key,Date.now()+60000);
+      monthCurrentKey=null;
+      await chrome.storage.local.set({
+        month_history_error:("История 30 дней "+item.ticker+": "+String(error.message||error)).slice(0,200)
+      });
+    }
+  }
+
   async function verifyAuthor() {
     if (Date.now()-lastIdentityCheck < 90000) return;
     if (!nicknameUrl || !instrumentUrl) throw Error("Не обнаружен запрос подтверждения автора; обнови Сделки F5");
@@ -331,6 +431,7 @@
                      {last_success_at:new Date().toISOString(),last_instrument_count:list.length,last_error:""});
       consecutiveFailures=0;
       await backfillHistory(profileUrl,list,config);
+      await backfillMonth(profileUrl,list,config);
       return interval;
     }catch(error){
       consecutiveFailures++;
