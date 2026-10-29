@@ -100,6 +100,8 @@ class BrowserLiveGuardTests(unittest.TestCase):
 
     def test_real_confirmation_requires_explicit_opt_in_and_fresh_portfolio(self):
         self.settings["extension_live_enabled"]=True
+        from trade_approvals import fingerprint
+        self.trade["_delivery_context"]={"live_enabled":True,"settings_hash":fingerprint(self.settings)}
         with patch.object(demo_admin,"EXTENSION_TRADES",self.trades), \
              patch.object(demo_admin,"EXTENSION_PORTFOLIO",self.portfolio), \
              patch.object(demo_admin,"load_settings",return_value=self.settings), \
