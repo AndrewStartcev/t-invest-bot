@@ -12,7 +12,7 @@ import json
 import re
 import secrets
 import threading
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 from client_accounts import atomic_text
@@ -126,15 +126,99 @@ class ExtensionStore:
                 result["last_status"] = "unavailable"
         return result
 
+    def history_progress(self, expected_profile):
+        profile = canonical_profile_url(expected_profile)
+        with self.lock:
+            state = self._read()
+        if state.get("profile_url") != profile:
+            return {"done": [], "target_total": 0, "complete": False,
+                    "loaded": 0, "status": "waiting"}
+        done = state.get("history_done", [])
+        instruments = state.get("instruments", [])
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+        targets = set()
+        for instrument in instruments:
+            try:
+                if int(instrument.get("totalOperationsCount", 0)) <= 0:
+                    continue
+                when = instrument.get("maxTradeDateTime")
+                if when:
+                    stamp = datetime.fromisoformat(when.replace("Z", "+00:00"))
+                    if stamp.tzinfo is not None and stamp < cutoff:
+                        continue
+                targets.add(_instrument_key(instrument["ticker"], instrument["classCode"]))
+            except (TypeError, ValueError, KeyError):
+                # An unrecognized timestamp must not suppress a potential trade.
+                if isinstance(instrument, dict) and "ticker" in instrument and "classCode" in instrument:
+                    targets.add(_instrument_key(instrument["ticker"], instrument["classCode"]))
+        completed = len(targets.intersection(done))
+        return {"done": done, "target_total": len(targets), "completed": completed,
+                "complete": len(targets) == completed, "loaded": len(state.get("history_entries", [])),
+                "status": "ready" if len(targets) == completed else "loading"}
+
+    def accept_history(self, report, expected_profile):
+        """Save a read-only 24h history batch; never advance trade watermarks.
+
+        A repeated batch is idempotent and historic trades NEVER trigger broker
+        signals, demo orders or Telegram notifications.
+        """
+        if not isinstance(report, dict) or report.get("kind") != "history":
+            raise ValueError("Некорректный отчёт истории")
+        if canonical_profile_url(report.get("profile_url")) != canonical_profile_url(expected_profile):
+            raise ValueError("История принадлежит другому автору")
+        ticker, code = report.get("ticker"), report.get("classCode")
+        key = _instrument_key(ticker, code)
+        raw = report.get("events")
+        if not isinstance(raw, list) or len(raw) > 500:
+            raise ValueError("Один пакет истории не может содержать более 500 операций")
+        parsed = [_trade(row) for row in raw]
+        if any(row["ticker"] != ticker or row["classCode"] != code for row in parsed):
+            raise ValueError("История содержит операции другого инструмента")
+        now = datetime.now(timezone.utc)
+        cutoff = now - timedelta(hours=24)
+        for row in parsed:
+            stamp = datetime.fromisoformat(row["tradeDateTime"].replace("Z", "+00:00"))
+            if not cutoff <= stamp <= now + timedelta(minutes=5):
+                raise ValueError("Историческая операция вне последних 24 часов")
+        with self.lock:
+            state = self._read()
+            profile = canonical_profile_url(expected_profile)
+            if state.get("profile_url") != profile or state.get("last_status") != "ok":
+                raise ValueError("Сначала нужно получить полный снимок выбранного автора")
+            instrument_keys = {
+                _instrument_key(item["ticker"], item["classCode"])
+                for item in state.get("instruments", [])
+            }
+            if key not in instrument_keys:
+                raise ValueError("Инструмент отсутствует в подтверждённом снимке автора")
+            done = state.setdefault("history_done", [])
+            if key in done:
+                return {"ok": True, "read_only": True, "duplicate": True, "accepted": 0}
+            old = state.get("history_entries", [])
+            filtered = [row for row in old if row["ticker"] != ticker or row["classCode"] != code]
+            # Preserve multiplicity for indistinguishable same-second trades.
+            filtered.extend(parsed)
+            filtered.sort(key=lambda row: row["tradeDateTime"], reverse=True)
+            state["history_entries"] = filtered[:5000]
+            state["history_truncated"] = len(filtered) > 5000
+            done.append(key)
+            self._save(state)
+        return {"ok": True, "read_only": True, "duplicate": False, "accepted": len(parsed)}
+
     def public_snapshot(self, expected_profile):
         profile = canonical_profile_url(expected_profile)
         with self.lock:
             current = self._read()
         if current.get("profile_url") != profile:
             return {"last_status": "never", "instruments": [], "recent": [],
+                    "history_entries": [], "history": {"status":"waiting","target_total":0,
+                    "completed":0,"complete":False,"loaded":0},
                     "total_events": 0, "active": False}
         return {**self.public_status(), "instruments": current.get("instruments", []),
-                "recent": current.get("recent", [])}
+                "recent": current.get("recent", []),
+                "history_entries": current.get("history_entries", []),
+                "history": self.history_progress(expected_profile),
+                "history_truncated": current.get("history_truncated", False)}
 
     def accept(self, report, expected_profile, emit=None, alert=None):
         """Validate complete deltas, atomically commit watermarks, then notify.
@@ -154,7 +238,8 @@ class ExtensionStore:
                 same = current.get("profile_url") == profile
                 counts = current.get("counts", {}) if same else {}
             return {"ok": True, "read_only": True, "profile_url": profile,
-                    "counts": counts, "reset_baseline": not same or not counts}
+                    "counts": counts, "history_done": current.get("history_done", []) if same else [],
+                    "reset_baseline": not same or not counts}
         if status not in VALID_STATUS:
             raise ValueError("Неизвестный статус")
         profile_url = canonical_profile_url(report.get("profile_url"))
@@ -200,6 +285,9 @@ class ExtensionStore:
                 before = {}
                 data["counts"] = {}
                 data["instruments"] = []
+                data["history_done"] = []
+                data["history_entries"] = []
+                data["history_truncated"] = False
                 data["recent"] = []
             if status == "ok":
                 if not counts and before:
