@@ -694,6 +694,8 @@
         if(deals.last_status==='ok'&&deals.active)
           return {label:'Сделки из Brave · '+(deals.instruments?.length||0)+' инструментов',
             detail:'Последний отчёт: '+fmtDate(deals.last_report)+'. Серверный браузер не используется.'};
+        if(auth.last_status==='stopped'||deals.last_status==='stopped')
+          return {label:'Расширение выключено',detail:'Включи мониторинг в Brave, если хочешь получать сделки.',warning:true};
         if(auth.last_status==='login_required')
           return {label:'Требуется вход в Пульс',
                   detail:'Открой расширение Brave и нажми «Войти в Пульс».',error:true};
