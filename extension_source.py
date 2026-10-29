@@ -161,6 +161,11 @@ class ExtensionStore:
                         raise ValueError("Счётчик сделок уменьшился; нужна ручная сверка")
                     if previous is not None and value > previous:
                         pending[key] = value - previous
+                # Replayed HTTP request after a lost ACK: accept only if all
+                # previously committed events match persisted recent history.
+                # No second journal entry / Telegram notification is emitted.
+                if normalized and not pending and all(event in data.get("recent", []) for event in normalized):
+                    normalized = []
                 received = {}
                 for event in normalized:
                     key = _instrument_key(event["ticker"], event["classCode"])
