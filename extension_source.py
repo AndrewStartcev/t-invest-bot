@@ -202,7 +202,7 @@ class ExtensionStore:
             filtered.extend(parsed)
             filtered.sort(key=lambda row: row["tradeDateTime"], reverse=True)
             state["history_entries"] = filtered[:5000]
-            state["history_truncated"] = len(filtered) > 5000
+            state["history_truncated"] = bool(state.get("history_truncated")) or len(filtered) > 5000
             done.append(key)
             self._save(state)
         return {"ok": True, "read_only": True, "duplicate": False, "accepted": len(parsed)}
