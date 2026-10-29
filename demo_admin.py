@@ -443,18 +443,62 @@ def extension_alert(kind, message):
 
 
 def extension_record_trade(trade):
-    """Record browser-supplied *observations*, never run trading decisions."""
+    """Use existing *paper* copy rules on new browser trades, never broker orders.
+
+    This callback runs only for committed new deltas from ExtensionStore;
+    historic 24h/monthly imports never call it. The real-order pathway stays
+    disconnected until separately approved and tested with a durable outbox.
+    """
     settings = load_settings()
+    snapshot = EXTENSION_TRADES.public_snapshot(settings["profile_url"])
+    meta = next((item for item in snapshot.get("instruments", [])
+                 if item["ticker"] == trade["ticker"]
+                 and item["classCode"] == trade["classCode"]), None)
+    kind = asset_type((meta or {}).get("type", ""), trade["classCode"])
     event = {"time": datetime.now(timezone.utc).isoformat(), "source": "extension_trade",
              "profile": settings["profile_url"], "instrument": trade["ticker"],
+             "instrument_name": (meta or {}).get("showName", trade["ticker"]),
              "ticker": trade["ticker"], "classCode": trade["classCode"],
-             "action": trade["action"], "side": trade["action"],
+             "asset_type": kind, "action": trade["action"], "side": trade["action"],
              "price": trade["averagePrice"], "tradeDateTime": trade["tradeDateTime"],
              "trade": "Расширение: " + ("покупка" if trade["action"] == "buy" else "продажа"),
-             "reason": "Данные из браузера клиента; только наблюдение, без заявки"}
-    if settings.get("monitoring_enabled"):
+             "reason": "Данные из авторизованного браузера клиента"}
+    if settings.get("real_mode") != "off":
+        # Do not interpret an existing 'auto' setting as permission to
+        # execute real orders through a newly introduced data source.
+        event.update(real_status="blocked", trade="РЕАЛЬНО: новый источник ещё не разрешён",
+                     reason="Для реальных заявок требуется отдельная проверка защиты от повторов")
+    elif settings.get("monitoring_enabled") and settings.get("auto_demo_buy") and schedule_open(settings):
+        positions = EXTENSION_PORTFOLIO.public_snapshot(settings["profile_url"]).get("positions", {})
+        signal = {"ticker": trade["ticker"], "classCode": trade["classCode"],
+                  "name": (meta or {}).get("showName", trade["ticker"]),
+                  "asset_type": kind, "side": trade["action"],
+                  "price": trade["averagePrice"], "currency": "",
+                  "lot_size": 1 if kind in {"stock", "bond", "fund"} else None,
+                  "investor_position": positions.get(
+                      trade["ticker"] + ":" + trade["classCode"], {"status": "unavailable"})}
+        try:
+            if kind not in {"stock", "bond", "fund", "future"}:
+                raise ValueError("Тип инструмента пока не поддерживается")
+            reasons = approval_reasons(signal, settings["policy"])
+            if reasons:
+                # Existing approval model handles demo decisions too.
+                identity = (settings["profile_url"] + "|" + trade["ticker"] + "|" +
+                            trade["classCode"] + "|" + trade["tradeDateTime"] + "|" +
+                            trade["action"] + "|" + str(trade["averagePrice"]))
+                source_key = "extension:" + hashlib.sha256(identity.encode()).hexdigest()
+                row = queue_approval(event, signal, settings, source_key, reasons)
+                event["notification"] = "ожидает решения"
+                notify(event, settings, "Пульс · ожидает подтверждения ДЕМО: " +
+                       trade["ticker"] + ". " + "; ".join(reasons),
+                       urgent=True, keyboard=approval_keyboard(row))
+            else:
+                apply_demo(event, signal, settings)
+        except (ValueError, TradeError, OSError) as exc:
+            event.update(demo_status="blocked",trade="ДЕМО: пропущено",reason=str(exc)[:180])
+    if settings.get("monitoring_enabled") and event.get("notification") != "ожидает решения":
         notify(event, settings, "Пульс · " + trade["ticker"] + " · " + event["trade"] +
-              " · " + str(trade["averagePrice"]) + ". Только наблюдение.")
+              ". " + event["reason"])
     add_event(event)
 
 
