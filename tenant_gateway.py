@@ -95,7 +95,8 @@ class Manager:
         with self.lock:
             directory = self.accounts.directory(user)
             if user not in self.workers:
-                env = {**os.environ, "TINVEST_SOURCE_RPC_URL": f"http://127.0.0.1:{self.source.port}",
+                env = {**os.environ, "TINVEST_CLIENT_USERNAME": user,
+                       "TINVEST_SOURCE_RPC_URL": f"http://127.0.0.1:{self.source.port}",
                        "TINVEST_SOURCE_RPC_KEY": self.source.key,
                        "TINVEST_SOURCE_KEY": secrets.token_hex(32)}
                 env.pop("PULSE_QUICK_PIN", None)
@@ -159,13 +160,16 @@ class Gateway(BaseHTTPRequestHandler):
             self.reply(200, {"status": "ok", "server_mode": True, "multi_user": True})
             return
         owner = self.path.startswith("/source-admin")
+        # Only this exact route skips nginx Basic Auth. The selected worker still
+        # verifies its own per-customer pairing key in constant time.
+        extension = post and self.path == "/api/extension/report"
         expected = source_key() if owner else os.environ.get("TINVEST_GATEWAY_KEY", "")
         header = "X-TInvest-Source-Key" if owner else "X-TInvest-Gateway-Key"
-        if not matches(self.headers.get(header, ""), expected):
+        if not extension and not matches(self.headers.get(header, ""), expected):
             self.reply(403, {"error": "Доступ отклонён"})
             return
         manager = self.server.manager
-        user = self.headers.get("X-TInvest-User", "")
+        user = self.headers.get("X-TInvest-Extension-Client", "") if extension else self.headers.get("X-TInvest-User", "")
         try:
             if not owner:
                 manager.accounts.directory(user)
@@ -174,14 +178,14 @@ class Gateway(BaseHTTPRequestHandler):
                     return
             data, body = {}, None
             if post:
-                if self.headers.get("Origin") != public_origin():
+                if not extension and self.headers.get("Origin") != public_origin():
                     self.reply(403, {"error": "Запрос из другого источника отклонён"})
                     return
                 if self.headers.get("Content-Type", "").split(";")[0] != "application/json":
                     self.reply(415, {"error": "Нужен JSON"})
                     return
                 length = int(self.headers.get("Content-Length", "0"))
-                if not 0 < length <= 8192:
+                if not 0 < length <= (128 * 1024 if extension else 8192):
                     raise ValueError("Некорректный размер запроса")
                 body = self.rfile.read(length)
                 data = json.loads(body)
@@ -204,6 +208,8 @@ class Gateway(BaseHTTPRequestHandler):
             try:
                 # User-supplied identity, authorization, cookies and private headers are not forwarded.
                 headers = {"X-TInvest-Backend-Key": worker.key}
+                if extension:
+                    headers["X-TInvest-Extension-Key"] = self.headers.get("X-TInvest-Extension-Key", "")
                 for name in ["Content-Type", "Origin"]:
                     if self.headers.get(name):
                         headers[name] = self.headers[name]
