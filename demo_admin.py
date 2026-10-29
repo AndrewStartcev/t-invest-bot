@@ -595,8 +595,8 @@ def extension_dashboard():
     else:
         message = "Ждём первый полный снимок из расширения Brave. Серверный браузер не используется."
     display = []
-    names = {item["ticker"] + ":" + item["classCode"]: item.get("showName") or item["ticker"]
-             for item in instruments}
+    metadata = {item["ticker"] + ":" + item["classCode"]: item for item in instruments}
+    names = {key: item.get("showName") or item["ticker"] for key, item in metadata.items()}
     cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
     # A historic scan may overlap subsequent live delta reports. Merge by
     # multiset maximum instead of concatenation: identical published trades
@@ -606,6 +606,24 @@ def extension_dashboard():
         return (trade["ticker"], trade["classCode"], trade["action"],
                 datetime.fromisoformat(trade["tradeDateTime"].replace("Z", "+00:00")).isoformat(),
                 trade["averagePrice"])
+    def stable_id(key, occurrence):
+        payload = json.dumps([settings["profile_url"], *key, occurrence], ensure_ascii=False)
+        return "extension:" + hashlib.sha256(payload.encode()).hexdigest()[:24]
+
+    def display_row(trade, key, occurrence):
+        identifier = trade["ticker"] + ":" + trade["classCode"]
+        meta = metadata.get(identifier, {})
+        kind = asset_type(meta.get("type", ""), trade["classCode"])
+        date = datetime.fromisoformat(trade["tradeDateTime"].replace("Z", "+00:00"))
+        can_repeat = (kind in {"stock", "bond", "fund"} and trade["action"] == "buy"
+                      and date >= cutoff)
+        return {"id": stable_id(key, occurrence), "profile": nickname,
+                "name": names.get(identifier, trade["ticker"]), "asset_type": kind,
+                "ticker": trade["ticker"], "classCode": trade["classCode"],
+                "tradeDateTime": trade["tradeDateTime"], "action": trade["action"],
+                "price": trade["averagePrice"], "currency": "",
+                "can_demo_buy": can_repeat}
+
     counts = Counter()
     original = {}
     for channel in ("history_entries", "recent"):
@@ -623,14 +641,8 @@ def extension_dashboard():
         for key, quantity in current.items():
             counts[key] = max(counts[key], quantity)
     for key, amount in counts.items():
-        trade = original[key]
         for occurrence in range(amount):
-            display.append({"id": "extension:" + str(len(display)), "name": names.get(
-                            trade["ticker"] + ":" + trade["classCode"], trade["ticker"]),
-                            "ticker": trade["ticker"], "classCode": trade["classCode"],
-                            "tradeDateTime": trade["tradeDateTime"], "action": trade["action"],
-                            "price": trade["averagePrice"], "currency": "",
-                            "can_demo_buy": False})
+            display.append(display_row(original[key], key, occurrence))
     month_progress = EXTENSION_TRADES.month_progress(settings["profile_url"])
     month_cutoff = datetime.now(timezone.utc) - timedelta(days=30)
     monthly_counts = Counter()
@@ -652,14 +664,12 @@ def extension_dashboard():
             monthly_counts[key] = max(monthly_counts[key], number)
     month_display = []
     for key, number in monthly_counts.items():
-        trade = monthly_original[key]
-        for unused in range(number):
-            month_display.append({"id": "monthly:" + str(len(month_display)),
-                "name": names.get(trade["ticker"] + ":" + trade["classCode"], trade["ticker"]),
-                "ticker": trade["ticker"], "classCode": trade["classCode"],
-                "tradeDateTime": trade["tradeDateTime"], "action": trade["action"],
-                "price": trade["averagePrice"], "currency": "",
-                "can_demo_buy": False})
+        for occurrence in range(number):
+            row = display_row(monthly_original[key], key, occurrence)
+            # Only copies also present in the full last-24h snapshot may be
+            # manually repeated, matching the previous cabinet behaviour.
+            row["can_demo_buy"] = row["can_demo_buy"] and occurrence < counts.get(key, 0)
+            month_display.append(row)
     month_display.sort(key=lambda row: row["tradeDateTime"], reverse=True)
     return {"auth": {"status": "authenticated" if connected else "required", "message": message},
             "monitor": {"status": "running" if connected else "waiting", "message": message,
