@@ -509,14 +509,50 @@ def extension_dashboard():
                             "tradeDateTime": trade["tradeDateTime"], "action": trade["action"],
                             "price": trade["averagePrice"], "currency": "",
                             "can_demo_buy": False})
+    month_progress = EXTENSION_TRADES.month_progress(settings["profile_url"])
+    month_cutoff = datetime.now(timezone.utc) - timedelta(days=30)
+    monthly_counts = Counter()
+    monthly_original = {}
+    for channel in (EXTENSION_TRADES.month_entries(settings["profile_url"]),
+                    snapshot.get("history_entries", []), snapshot.get("recent", [])):
+        channel_counts = Counter()
+        for trade in channel:
+            try:
+                stamp = datetime.fromisoformat(trade["tradeDateTime"].replace("Z", "+00:00"))
+                if stamp.tzinfo is None or stamp < month_cutoff:
+                    continue
+                key = signature(trade)
+                channel_counts[key] += 1
+                monthly_original[key] = trade
+            except (ValueError, TypeError, KeyError):
+                continue
+        for key, number in channel_counts.items():
+            monthly_counts[key] = max(monthly_counts[key], number)
+    month_display = []
+    for key, number in monthly_counts.items():
+        trade = monthly_original[key]
+        for unused in range(number):
+            month_display.append({"id": "monthly:" + str(len(month_display)),
+                "name": names.get(trade["ticker"] + ":" + trade["classCode"], trade["ticker"]),
+                "ticker": trade["ticker"], "classCode": trade["classCode"],
+                "tradeDateTime": trade["tradeDateTime"], "action": trade["action"],
+                "price": trade["averagePrice"], "currency": "",
+                "can_demo_buy": False})
+    month_display.sort(key=lambda row: row["tradeDateTime"], reverse=True)
     return {"auth": {"status": "authenticated" if connected else "required", "message": message},
             "monitor": {"status": "running" if connected else "waiting", "message": message,
                         "phase": "extension", "profile": nickname, "last_check": latest,
                         "instrument_count": len(instruments), "instruments": instruments},
             "today": sorted(display, key=lambda item: item["tradeDateTime"], reverse=True),
             "history_progress": snapshot.get("history", {}),
-            "month": {"status": "idle", "items": [], "processed": 0, "total": 0,
-                      "message": "Через расширение пока передаются новые операции", "loaded_at": None}}
+            "month": {"status": "ready" if month_progress["complete"] else "loading",
+                      "items": month_display, "processed": month_progress["completed"],
+                      "total": month_progress["target_total"],
+                      "message": ("Месячная история загружена" if month_progress["complete"] else
+                                  "Загружаем историю через браузер: " +
+                                  str(month_progress["completed"]) + " из " +
+                                  str(month_progress["target_total"]) + " инструментов"),
+                      "loaded_at": latest}}
 
 
 def extension_watchdog_loop():
@@ -1787,7 +1823,9 @@ class Handler(BaseHTTPRequestHandler):
                     current = EXTENSION_TRADES.accept({"status":"test"}, load_settings()["profile_url"])
                     self.respond(200, current)
                     return
-                if report.get("kind") == "history":
+                if report.get("kind") == "month_history":
+                    result = EXTENSION_TRADES.accept_month_history(report, load_settings()["profile_url"])
+                elif report.get("kind") == "history":
                     result = EXTENSION_TRADES.accept_history(report, load_settings()["profile_url"])
                 elif report.get("kind") == "trades":
                     result = EXTENSION_TRADES.accept(report, load_settings()["profile_url"],
