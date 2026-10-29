@@ -15,6 +15,7 @@ EXTENSION_FILES = (
     "manifest.json",
     "background.js",
     "content.js",
+    "portfolio.js",
     "popup.html",
     "popup.css",
     "popup.js",
