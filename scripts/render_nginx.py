@@ -58,7 +58,7 @@ server {{
     # Only this precise path is accessible without the dashboard password.
     location = /api/extension/report {{
         auth_basic off;
-        client_max_body_size 128k;
+        client_max_body_size 2m;
         {client_proxy}
         proxy_pass http://127.0.0.1:8765;
         proxy_set_header Host $host;
