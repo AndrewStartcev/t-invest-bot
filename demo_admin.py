@@ -1764,12 +1764,11 @@ class Handler(BaseHTTPRequestHandler):
                     self.respond(200, current)
                     return
                 if report.get("kind") == "trades":
-                    if report.get("status") != "ok":
-                        raise ValueError("Отчёт по сделкам должен быть полным")
                     result = EXTENSION_TRADES.accept(report, load_settings()["profile_url"],
                                                      emit=extension_record_trade)
-                    EXTENSION_SOURCE.accept_auth({"kind":"auth_status","status":"authenticated"},
-                                                  alert=extension_alert)
+                    if report.get("status") == "ok":
+                        EXTENSION_SOURCE.accept_auth({"kind":"auth_status","status":"authenticated"},
+                                                      alert=extension_alert)
                 else:
                     result = EXTENSION_SOURCE.accept_auth(report, alert=extension_alert)
                 self.respond(200, result)
