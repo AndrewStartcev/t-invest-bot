@@ -142,6 +142,7 @@
     const seen = new Set();
     const cutoff = Date.now() - HISTORY_HORIZON_MS;
     let cursor = null;
+    let previousTradeTime = Infinity;
     for(let pageNum = 0; pageNum < 50; pageNum++) {
       const page = await api(cursorUrl(base.href, cursor, "cursor"));
       let reachedCutoff = false;
@@ -149,6 +150,9 @@
         const timestamp = Date.parse(item?.tradeDateTime);
         if(!Number.isFinite(timestamp))
           throw Error("Некорректная дата истории: " + ticker);
+        if(timestamp > previousTradeTime)
+          throw Error("Пульс вернул историю не по убыванию даты: " + ticker);
+        previousTradeTime = timestamp;
         if(timestamp < cutoff) {
           reachedCutoff = true;
           continue;
