@@ -90,6 +90,11 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
       if (sender.tab) throw Error("Тест запускается из настроек расширения");
       return await sendReport({status:"test"});
     }
+    if (message?.kind === "stop") {
+      if (sender.tab) throw Error("Остановить можно только из настроек расширения");
+      const cfg = await chrome.storage.local.get("profile_url");
+      return await sendReport({status:"stopped",profile_url:cfg.profile_url});
+    }
     throw Error("Неизвестная команда расширения");
   })().then(data => reply({ok:true,data}), error => {
     chrome.storage.local.set({last_error: String(error?.message || error).slice(0,250)}).catch(() => {});
