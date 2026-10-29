@@ -127,7 +127,7 @@ chrome.runtime.onMessage.addListener((message,sender,reply)=>{
     }
     if(message?.kind==="report"){
       if(!bankTab(sender))throw Error("Данные принимаются только из вкладки Пульса");
-      if(!message.report||!["trades","history","auth_status"].includes(message.report.kind))
+      if(!message.report||!["trades","history","month_history","auth_status"].includes(message.report.kind))
         throw Error("Неизвестный формат отчёта");
       return send(message.report);
     }
