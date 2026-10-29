@@ -123,6 +123,87 @@
     throw Error("История " + ticker + " неполная; счётчики сохранены без изменения");
   }
 
+  const historyRetryAt = new Map();
+  const HISTORY_HORIZON_MS = 24 * 60 * 60 * 1000;
+  const HISTORY_LIMIT = 500;
+
+  async function recentHistory(ticker, code) {
+    const base = new URL(instrumentUrl);
+    base.pathname = base.pathname.replace(/\/instrument\/?$/, "/operation/instrument/" +
+      encodeURIComponent(ticker) + "/" + encodeURIComponent(code));
+    base.search = "";
+    const found = [];
+    const seen = new Set();
+    const cutoff = Date.now() - HISTORY_HORIZON_MS;
+    let cursor = null;
+    for(let pageNum = 0; pageNum < 50; pageNum++) {
+      const page = await api(cursorUrl(base.href, cursor, "cursor"));
+      let reachedCutoff = false;
+      for(const item of page.items){
+        const timestamp = Date.parse(item?.tradeDateTime);
+        if(!Number.isFinite(timestamp))
+          throw Error("Некорректная дата истории: " + ticker);
+        if(timestamp < cutoff) {
+          reachedCutoff = true;
+          continue;
+        }
+        if(timestamp > Date.now() + 5 * 60 * 1000)
+          throw Error("Дата сделки в будущем: " + ticker);
+        found.push({
+          ticker, classCode:code, action:item.action,
+          tradeDateTime:item.tradeDateTime, averagePrice:item.averagePrice
+        });
+        if(found.length > HISTORY_LIMIT)
+          throw Error("Более 500 сделок за 24 часа по " + ticker +
+            "; история требует постраничной синхронизации");
+      }
+      if(reachedCutoff || !page.hasNext) return found;
+      cursor = page.nextCursor;
+      if ((typeof cursor !== "number" && typeof cursor !== "string") || seen.has(String(cursor)))
+        throw Error("Повторный курсор истории " + ticker);
+      seen.add(String(cursor));
+    }
+    throw Error("История за 24 часа не загрузилась полностью по " + ticker);
+  }
+
+  async function backfillHistory(profileUrl, instruments, config) {
+    // Do one instrument per poll. The main counter report is already
+    // acknowledged and future live trades are never blocked by backfill.
+    const done = new Set(config.history_done || []);
+    const cutoff = Date.now() - HISTORY_HORIZON_MS;
+    const pending = instruments.filter(item => {
+      if (item.totalOperationsCount <= 0) return false;
+      const last = Date.parse(item.maxTradeDateTime || "");
+      if(Number.isFinite(last) && last < cutoff) return false;
+      const key = item.ticker + ":" + item.classCode;
+      return !done.has(key) && Date.now() >= (historyRetryAt.get(key) || 0);
+    }).sort((a,b) => {
+      const first = Date.parse(a.maxTradeDateTime || "") || 0;
+      const second = Date.parse(b.maxTradeDateTime || "") || 0;
+      return second - first;
+    });
+    if(!pending.length)return;
+    const item = pending[0];
+    const key = item.ticker + ":" + item.classCode;
+    try {
+      await setStage("История за 24 часа: "+item.ticker);
+      const found = await recentHistory(item.ticker,item.classCode);
+      await request({kind:"report",report:{
+        kind:"history",profile_url:profileUrl,
+        ticker:item.ticker,classCode:item.classCode,events:found
+      }});
+      historyRetryAt.delete(key);
+      await setStage("История загружена: "+item.ticker+" · "+found.length+" операций");
+    } catch(error) {
+      // A corrupt/incomplete instrument must remain unacknowledged, without
+      // preventing monitoring of other instruments. Retry it later.
+      historyRetryAt.set(key,Date.now() + 60000);
+      await chrome.storage.local.set({
+        history_error:("История "+item.ticker+": "+String(error.message||error)).slice(0,200)
+      });
+    }
+  }
+
   async function verifyAuthor() {
     if (Date.now()-lastIdentityCheck < 90000) return;
     if (!nicknameUrl || !instrumentUrl) throw Error("Не обнаружен запрос подтверждения автора; обнови Сделки F5");
@@ -235,6 +316,7 @@
       await setStage("Данные получены · "+list.length+" инструментов",
                      {last_success_at:new Date().toISOString(),last_instrument_count:list.length,last_error:""});
       consecutiveFailures=0;
+      await backfillHistory(profileUrl,list,config);
       return interval;
     }catch(error){
       consecutiveFailures++;
