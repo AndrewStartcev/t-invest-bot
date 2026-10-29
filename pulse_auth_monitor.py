@@ -95,7 +95,7 @@ class PulseAuthStore(ExtensionStore):
                 state["failures"] = int(state.get("failures", 0)) + 1 if previous == status else 1
                 state["last_error"] = "Банк запрашивает повторный вход"
                 state["active"] = True
-                if state["failures"] >= 2 and state.get("incident") != "login_required":
+                if state.get("incident") != "login_required":
                     state["incident"] = "login_required"
                     messages.append(("incident", "⚠️ Пульс: авторизация пропала. Открой Brave и войди в Т-Банк повторно."))
             else:
