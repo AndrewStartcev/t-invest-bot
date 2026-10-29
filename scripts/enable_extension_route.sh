@@ -36,7 +36,8 @@ fi
 backup=$(mktemp /etc/nginx/sites-available/t-invest-bot.backup.XXXXXXXX)
 temp=$(mktemp /etc/nginx/sites-available/t-invest-bot.new.XXXXXXXX)
 chmod 600 "$backup" "$temp"
-cp -p "$CONFIG" "$backup"
+cp "$CONFIG" "$backup"
+chmod 600 "$backup"
 
 rollback() {
   cp -p "$backup" "$CONFIG"
