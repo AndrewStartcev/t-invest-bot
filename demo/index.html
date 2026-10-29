@@ -893,14 +893,18 @@
       renderBroker(state);renderTrading(state);
       const profile=new URL(state.settings.profile_url).pathname.split('/').filter(Boolean).at(-1);
       el('profile-heading').textContent=profile+' · профиль Пульса';el('source-profile').textContent=profile;
-      el('source-mode').textContent=extensionMode?'Источник: расширение Brave · только чтение':
+      el('source-mode').textContent=extensionMode?'Пульс через Яндекс Браузер / Brave · '+(realMode==='off'?'демо':'торговый режим'):
          state.monitor.status==='scheduled'?'Ожидание расписания · МСК':realMode==='off'?(state.settings.monitoring_enabled?'Мониторинг включён':'Мониторинг выключен'):'Реальная торговля · '+(realMode==='auto'?'авто':'подтверждение');
       el('month-button').hidden=false;
       el('mode-badge').textContent=extensionMode
         ?(realMode==='off'?'Мониторинг из браузера · демо'
           :state.settings.extension_live_enabled?'Реальные заявки · дополнительное разрешение включено':'Реальные заявки · источник заблокирован') :
          state.monitor.status==='scheduled'?'Ожидание расписания · МСК':realMode==='off'?(state.settings.monitoring_enabled?'Мониторинг включён':'Мониторинг выключен'):'Реальные заявки · '+(realMode==='auto'?'авто':'подтверждение');
-      el('trade-top-status').textContent=extensionMode?'Расширение: наблюдение без брокерских заявок':realMode==='off'?'Брокерские заявки отключены':'Реальная торговля включена';
+      el('trade-top-status').textContent=extensionMode
+        ?(realMode==='off'?'Расширение · реальные заявки выключены'
+          :state.settings.extension_live_enabled?'Источник разрешён · перед отправкой требуются свежие данные'
+           :'Реальные заявки из расширения заблокированы')
+        :realMode==='off'?'Брокерские заявки отключены':'Реальная торговля включена';
       autoCopyEnabled=state.settings.auto_demo_buy;
       el('auto-copy-button').textContent=autoCopyEnabled?'Остановить автокопирование':'Включить автокопирование';
       el('auto-copy-button').className=autoCopyEnabled?'button neutral small':'button small';
