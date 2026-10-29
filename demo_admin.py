@@ -1771,6 +1771,10 @@ class Handler(BaseHTTPRequestHandler):
                                                       alert=extension_alert)
                 else:
                     result = EXTENSION_SOURCE.accept_auth(report, alert=extension_alert)
+                    if report.get("status") == "stopped":
+                        EXTENSION_TRADES.accept(
+                            {"status": "stopped", "profile_url": load_settings()["profile_url"]},
+                            load_settings()["profile_url"])
                 self.respond(200, result)
             except (ValueError, TypeError, PulseError) as error:
                 self.respond(422, {"error": str(error)[:240]})
