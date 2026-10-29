@@ -10,6 +10,7 @@
   const MAX_DELTA = 100;
   let instrumentUrl = null, busy = false, lastProfileCheck = 0, previousStart = 0;
   let consecutiveFailures = 0;
+  const mountedAt = Date.now();
 
   function selectedNickname(urlString) {
     try {
@@ -133,7 +134,7 @@
     } finally {clearTimeout(timer);}
   }
 
-  async function poll() {
+  async function poll(elapsed) {
     if (busy) return;
     busy = true;
     try {
@@ -145,12 +146,12 @@
         instrumentUrl = result.url;
       }
       if (!instrumentUrl) {
-        if (Date.now()-previousStart > 20000)
+        if (Date.now()-mountedAt > 20000)
           await request({kind:"report", report:{status:"unavailable",profile_url:cfg.profile_url,
             error:"Не найден запрос списка инструментов. Открой Сделки и обнови вкладку F5."}});
         return interval;
       }
-      if (document.hidden && Date.now() - previousStart > 15000) {
+      if (document.hidden && elapsed > 15000) {
         await request({kind:"report",report:{status:"background_throttled",profile_url:cfg.profile_url,
           error:"Вкладка находится в фоне; браузер замедляет интервалы."}});
       }
@@ -193,8 +194,9 @@
   }
 
   async function run() {
+    const elapsed = Date.now() - previousStart;
     previousStart = Date.now();
-    const delay = await poll();
+    const delay = await poll(elapsed);
     setTimeout(run,delay || 5000);
   }
 
