@@ -21,8 +21,8 @@ from pulse_live import canonical_profile_url
 VALID_STATUS = {"ok", "restricted", "login_required", "unavailable", "rate_limited",
                 "background_throttled", "stopped"}
 KEY_RE = re.compile(r"^[A-Za-z0-9_.-]{1,32}$")
-MAX_INSTRUMENTS = 500
-MAX_EVENTS = 100
+MAX_INSTRUMENTS = 6000
+MAX_EVENTS = 500
 STALE_SECONDS = 30
 
 
