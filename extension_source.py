@@ -7,6 +7,7 @@ not inputs to the trading engine until separately audited.
 """
 from __future__ import annotations
 
+import hashlib
 import hmac
 import json
 import re
@@ -411,6 +412,22 @@ class ExtensionStore:
                 if any(len(received.get(key, [])) != delta for key, delta in pending.items()):
                     raise ValueError("Неполная история: счётчики не обновлены")
                 fresh = normalized
+                # Commit a stable per-instrument sequence with the watermarks.
+                # Callbacks are asynchronous, and HTTP retries never append a
+                # second intent for a committed source sequence.
+                previous_count = {}
+                queue = data.setdefault("outbox", [])
+                for event in fresh:
+                    key = _instrument_key(event["ticker"], event["classCode"])
+                    next_sequence = previous_count.get(key, before.get(key, 0)) + 1
+                    previous_count[key] = next_sequence
+                    stable_id = "pulse:" + hashlib.sha256(
+                        (profile_url + "|" + key + "|" + str(next_sequence)).encode()
+                    ).hexdigest()
+                    queue.append({"id": stable_id, "trade": event,
+                                  "status": "pending", "created_at": iso_now()})
+                if len([item for item in queue if item.get("status") != "done"]) > 2000:
+                    raise ValueError("Очередь сигналов заполнена; счётчики не обновлены")
                 data["counts"] = {**before, **counts}
                 data["instruments"] = details
                 data["last_ok"] = iso_now()
@@ -458,6 +475,70 @@ class ExtensionStore:
                 alert(kind, message)
         return {"ok": True, "read_only": True, "accepted": len(fresh),
                 "last_report": data["last_report"]}
+
+    def drain_outbox(self, callback, max_items=25):
+        """At-most-once external side effects, with a durable pre-call claim.
+
+        A crash during callback leaves 'processing' for operator inspection,
+        never automatically retries a potentially placed brokerage order.
+        """
+        handled = 0
+        for unused in range(max_items):
+            with self.lock:
+                data = self._read()
+                items = data.get("outbox", [])
+                pending = next((item for item in items if item.get("status") == "pending"), None)
+                if pending is None:
+                    break
+                source_id = pending["id"]
+                try:
+                    age = (datetime.now(timezone.utc) -
+                           datetime.fromisoformat(pending["created_at"])).total_seconds()
+                except (ValueError, TypeError, KeyError):
+                    age = float("inf")
+                if age > 300:
+                    pending["status"] = "expired"
+                    pending["reason"] = "Сигнал устарел; автоматическое исполнение запрещено"
+                    self._save(data)
+                    continue
+                pending["status"] = "processing"
+                self._save(data)
+                trade = dict(pending["trade"])
+                trade["_source_key"] = source_id
+            try:
+                callback(trade)
+            except Exception:
+                # Crash/retry ambiguity: leave this intent for manual review.
+                with self.lock:
+                    data = self._read()
+                    for item in data.get("outbox", []):
+                        if item.get("id") == source_id and item.get("status") == "processing":
+                            item["status"] = "manual_review"
+                    self._save(data)
+                raise
+            with self.lock:
+                data = self._read()
+                for item in data.get("outbox", []):
+                    if item.get("id") == source_id and item.get("status") == "processing":
+                        item["status"] = "done"
+                # Keep recently completed audit records for diagnostics.
+                done = [item for item in data.get("outbox", []) if item.get("status") == "done"]
+                if len(done) > 500:
+                    completed_ids = {item["id"] for item in done[:-500]}
+                    data["outbox"] = [item for item in data["outbox"]
+                                      if item.get("id") not in completed_ids]
+                self._save(data)
+            handled += 1
+        return handled
+
+    def outbox_status(self):
+        with self.lock:
+            items = self._read().get("outbox", [])
+        statuses = {}
+        for item in items:
+            status = item.get("status", "unknown")
+            statuses[status] = statuses.get(status, 0) + 1
+        return statuses
 
     def tick(self, alert=None):
         """Detect a disappeared tab/extension even when no new reports arrive."""
