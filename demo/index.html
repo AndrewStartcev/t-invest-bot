@@ -380,7 +380,7 @@
   <script>
     const el = id => document.getElementById(id);
     let instruments = [], today = [], month = {status:'idle',items:[]}, monthView = false, events = [], realOrders = [], selected = null, historyCursor = null, tokenConfigured = false, authStatus = 'checking', authDismissed = false, instrumentLimit = 60, autoCopyEnabled = false, realMode = 'off', currentPreview = null;
-    let serverBrowserUrl = null, pulseWindow = null, popupBlocked = false, sharedSource = false, latestPulseState = null, extensionConnected = false;
+    let serverBrowserUrl = null, pulseWindow = null, popupBlocked = false, sharedSource = false, latestPulseState = null, extensionConnected = false, extensionMode = true;
     const tabs = [...document.querySelectorAll('[data-view]')];
     const pages = [...document.querySelectorAll('.view')];
     const names = {overview:'Обзор',settings:'Настройки',journal:'Журнал'};
@@ -450,7 +450,7 @@
       authStatus = auth.status;
       const ready = auth.status === 'authenticated';
       const extensionHasReports=Boolean(latestPulseState?.extension_source?.last_report);
-      const showDialog = !sharedSource && !ready && !authDismissed && !extensionHasReports;
+      const showDialog = !extensionMode && !sharedSource && !ready && !authDismissed && !extensionHasReports;
       el('auth-screen').hidden = !showDialog;
       el('admin-app').inert = showDialog;
       document.body.style.overflow = showDialog ? 'hidden' : '';
@@ -475,6 +475,12 @@
       return false;
     }
     async function startAuth() {
+      if (extensionMode) {
+        const profile=latestPulseState?.settings?.profile_url;
+        if(profile) window.open(profile.replace(/\/invest\/(social|pulse)\/profile\/([^/]+)\/?$/,
+           '/invest/pulse/profile/$2/operations/'), '_blank', 'noopener');
+        return;
+      }
       if (sharedSource) return;
       // Open during the click, before any await, so popup blockers allow it.
       const windowOpened = openServerBrowser();
@@ -497,6 +503,11 @@
     el('auth-show').addEventListener('click', () => api('/api/auth/start', {}).catch(error => el('auth-message').textContent = error.message));
     el('open-pulse').addEventListener('click', openConnectDialog);
     async function refreshAuthor(){
+      if (extensionMode) {
+        el('source-message').textContent='Данные обновляются расширением. Открой Сделки автора в Brave и обнови вкладку F5.';
+        await refresh();
+        return;
+      }
       const buttons=[el('refresh-source'),el('refresh-author')];buttons.forEach(button=>button.disabled=true);
       el('refresh-author').textContent='Обновляем…';
       try{
@@ -593,6 +604,19 @@
       if(!more){selected=item;historyCursor=null;el('history-list').replaceChildren();}
       el('history-panel').hidden=false;el('history-title').textContent='История · '+selected.showName;el('history-more').hidden=true;
       if(!more)el('history-list').textContent='Загружаем историю…';
+      if(extensionMode){
+        const rows=(latestPulseState?.extension_trades?.recent||[]).filter(item=>
+          item.ticker===selected.ticker&&item.classCode===selected.classCode);
+        const box=el('history-list');box.replaceChildren();
+        for(const item of rows){
+          const line=document.createElement('div');line.className='source-line';
+          line.textContent=fmtDate(item.tradeDateTime)+' · '+(item.action==='buy'?'Покупка':'Продажа')+
+            ' · '+item.averagePrice;box.append(line);
+        }
+        if(!rows.length)box.textContent='История появится после новых сделок, переданных расширением.';
+        el('history-more').hidden=true;
+        return;
+      }
       try{
         const result=await api('/api/history',{ticker:selected.ticker,classCode:selected.classCode,cursor:historyCursor});
         if(!more)el('history-list').replaceChildren();
@@ -665,6 +689,22 @@
       if(!consents.children.length)consents.textContent='Разрешений без подтверждения нет';
     }
     function pulseDisplayStatus(state){
+      if (state.extension_mode) {
+        const deals=state.extension_trades||{},auth=state.extension_source||{};
+        if(deals.last_status==='ok'&&deals.active)
+          return {label:'Сделки из Brave · '+(deals.instruments?.length||0)+' инструментов',
+            detail:'Последний отчёт: '+fmtDate(deals.last_report)+'. Серверный браузер не используется.'};
+        if(auth.last_status==='login_required')
+          return {label:'Требуется вход в Пульс',
+                  detail:'Открой расширение Brave и нажми «Войти в Пульс».',error:true};
+        if(deals.last_status==='unavailable'||deals.last_status==='rate_limited')
+          return {label:'Пульс: ждём данные из Brave',
+                  detail:deals.last_error||'Открой страницу «Сделки» в Brave и нажми F5.',warning:true};
+        if(deals.last_status==='offline')
+          return {label:'Расширение не отправляет сделки',detail:'Открой вкладку «Сделки» в Brave.',warning:true};
+        return {label:'Ожидаем первый снимок расширения',
+                detail:'Клиент должен открыть Сделки Пульса в авторизованном Brave и обновить вкладку F5.',loading:true};
+      }
       const ext=state.extension_source;
       if(ext?.last_report && ext.active){
         if(ext.last_status==='authenticated')return {label:'Вход в Пульс подтверждён',
@@ -799,6 +839,7 @@
       latestPulseState=state;
       el('account-panel').hidden=!state.account?.password_change;el('settings-tab-account').hidden=!state.account?.password_change;el('account-login').textContent=state.account?.username||'';
       sharedSource=Boolean(state.shared_source);
+      extensionMode=Boolean(state.extension_mode);
       const extensionState = state.extension_source || {};
       extensionConnected = extensionState.last_status === 'authenticated';
       const statuses = {
@@ -826,8 +867,10 @@
       renderBroker(state);renderTrading(state);
       const profile=new URL(state.settings.profile_url).pathname.split('/').filter(Boolean).at(-1);
       el('profile-heading').textContent=profile+' · профиль Пульса';el('source-profile').textContent=profile;
-      el('source-mode').textContent=state.monitor.status==='scheduled'?'Ожидание расписания · МСК':realMode==='off'?(state.settings.monitoring_enabled?'Мониторинг включён':'Мониторинг выключен'):'Реальная торговля · '+(realMode==='auto'?'авто':'подтверждение');
-      el('mode-badge').textContent=state.monitor.status==='scheduled'?'Ожидание расписания · МСК':realMode==='off'?(state.settings.monitoring_enabled?'Мониторинг включён':'Мониторинг выключен'):'Реальные заявки · '+(realMode==='auto'?'авто':'подтверждение');
+      el('source-mode').textContent=extensionMode?'Источник: расширение Brave · только чтение':
+         state.monitor.status==='scheduled'?'Ожидание расписания · МСК':realMode==='off'?(state.settings.monitoring_enabled?'Мониторинг включён':'Мониторинг выключен'):'Реальная торговля · '+(realMode==='auto'?'авто':'подтверждение');
+      el('mode-badge').textContent=extensionMode?'Мониторинг через Brave · без заявок':
+         state.monitor.status==='scheduled'?'Ожидание расписания · МСК':realMode==='off'?(state.settings.monitoring_enabled?'Мониторинг включён':'Мониторинг выключен'):'Реальные заявки · '+(realMode==='auto'?'авто':'подтверждение');
       el('trade-top-status').textContent=realMode==='off'?'Брокерские заявки отключены':'Реальная торговля включена';
       autoCopyEnabled=state.settings.auto_demo_buy;
       el('auto-copy-button').textContent=autoCopyEnabled?'Остановить автокопирование':'Включить автокопирование';
