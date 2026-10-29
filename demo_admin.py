@@ -442,17 +442,8 @@ def extension_alert(kind, message):
     add_event(event)
 
 
-def extension_live_source_ready(settings):
-    """Use the client's existing trading mode with a live Pulse browser feed.
-
-    No additional toggle, server environment unlock, or mandatory portfolio
-    read: the original order planner and approval policy still decide which
-    positions may be traded. A stale/disconnected author never authorizes
-    submitting a live order.
-    """
-    if (not settings.get("monitoring_enabled") or settings.get("paused")
-            or not schedule_open(settings)):
-        return False
+def extension_session_ok(settings):
+    """The selected author's authenticated browser session is the Pulse source."""
     source = EXTENSION_TRADES.public_snapshot(settings["profile_url"])
     if source.get("last_status") != "ok" or not source.get("active"):
         return False
@@ -464,9 +455,16 @@ def extension_live_source_ready(settings):
         return False
 
 
+def extension_live_source_ready(settings):
+    return (settings.get("monitoring_enabled") is True
+            and not settings.get("paused")
+            and schedule_open(settings)
+            and extension_session_ok(settings))
+
+
 def pulse_or_legacy_authorized(settings, source_key=""):
     # A browser-sourced approval can NEVER rely on a legacy AUTH flag.
-    if source_key.startswith("pulse:"):
+    if source_key.startswith(("pulse:", "browser-historic:")):
         return extension_live_source_ready(settings)
     return AUTH.get("status") == "authenticated"
 
@@ -927,10 +925,14 @@ def reconcile_loop() -> None:
 
 
 def real_signal(source_id: str) -> tuple[dict, str, dict | None]:
-    with LOCK:
-        candidate = next((item.copy() for item in TODAY if item["id"] == source_id), None)
-        event = next((item for item in EVENTS if item.get("source_key") == source_id
-                      and item.get("source") == "pulse"), None)
+    if source_id.startswith("extension:"):
+        candidate = next((item for item in extension_dashboard()["today"] if item["id"] == source_id), None)
+        event = None
+    else:
+        with LOCK:
+            candidate = next((item.copy() for item in TODAY if item["id"] == source_id), None)
+            event = next((item for item in EVENTS if item.get("source_key") == source_id
+                          and item.get("source") == "pulse"), None)
     if candidate:
         if candidate["action"] != "buy" or not candidate["can_demo_buy"]:
             raise TradeError("Для прошлой сделки доступна только покупка поддерживаемого инструмента")
@@ -938,7 +940,7 @@ def real_signal(source_id: str) -> tuple[dict, str, dict | None]:
             raise TradeError("Сделка старше 24 часов")
         return ({"ticker": candidate["ticker"], "classCode": candidate["classCode"],
                  "asset_type": candidate["asset_type"], "side": "buy"},
-                "historic:" + source_id, None)
+                ("browser-historic:" if source_id.startswith("extension:") else "historic:") + source_id, None)
     if event:
         if event.get("real_status") not in {"awaiting_approval", "blocked"}:
             raise TradeError("Эта сделка уже обработана")
@@ -961,10 +963,9 @@ def create_real_preview(source_id: str) -> dict:
     settings = load_settings()
     if settings["real_mode"] == "off":
         raise TradeError("Реальная торговля выключена")
-    with LOCK:
-        if AUTH["status"] != "authenticated":
-            raise TradeError("Нет подтверждённого входа в Пульс")
     signal, source_key, _ = real_signal(source_id)
+    if not pulse_or_legacy_authorized(settings, source_key):
+        raise TradeError("Нет подтверждённого входа в выбранный профиль Пульса")
     try:
         plan, _ = prepare_real(signal, settings)
     except TradeError as error:
@@ -983,13 +984,12 @@ def confirm_real_preview(preview_id: str) -> dict:
     if settings["real_mode"] == "off":
         raise TradeError("Реальная торговля выключена")
     with LOCK:
-        if AUTH["status"] != "authenticated":
-            raise TradeError("Нет подтверждённого входа в Пульс")
-    with LOCK:
         preview = PREVIEWS.pop(preview_id, None)
     if not preview or time.monotonic() - preview["created"] > 30:
         raise TradeError("Подтверждение устарело; подготовь заявку заново")
     signal, source_key = preview["signal"], preview["source_key"]
+    if not pulse_or_legacy_authorized(settings, source_key):
+        raise TradeError("Источник Пульса отключён либо данные устарели")
     try:
         with TRADE_FLOW_LOCK:
             plan, token = prepare_real(signal, settings)
@@ -2077,6 +2077,8 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError("Нужен объект JSON")
             with LOCK:
                 authenticated = AUTH["status"] == "authenticated"
+            if not authenticated:
+                authenticated = extension_session_ok(load_settings())
             if not authenticated and self.path not in {"/api/source/refresh", "/api/approval/decide", "/api/approval/refresh", "/api/asset/forget", "/api/auth/start", "/api/browser/show", "/api/auth/check", "/api/settings", "/api/auto-copy", "/api/demo", "/api/demo/scenario", "/api/demo/reset", "/api/telegram/test", "/api/broker/connect", "/api/broker/select", "/api/broker/refresh", "/api/trade/connect", "/api/trade/select", "/api/trade/preview", "/api/trade/submit", "/api/trade/reconcile"}:
                 self.respond(403, {"error": "Сначала авторизуйся в Пульсе"})
                 return
