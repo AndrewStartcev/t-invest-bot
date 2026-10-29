@@ -18,6 +18,11 @@ async function save() {
       !/^\/invest\/(?:social|pulse)\/profile\/[^/]+\/?$/.test(profile.pathname))
     throw Error("Введи ссылку на профиль автора, не на страницу Сделки");
   if (!el("config").reportValidity()) throw Error("Проверь поля");
+  const old = await chrome.storage.local.get(["enabled", "profile_url"]);
+  if (old.enabled && !el("enabled").checked) {
+    const reply = await chrome.runtime.sendMessage({kind:"stop"});
+    if (!reply?.ok) throw Error(reply?.error || "Сервер не подтвердил остановку");
+  }
   await chrome.storage.local.set({
     endpoint:origin, client:el("client").value.trim(), profile_url:profile.href,
     key:el("key").value.trim(), interval:Number(el("interval").value),
