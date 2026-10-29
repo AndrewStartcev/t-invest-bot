@@ -327,7 +327,7 @@
                 <div class="source-line"><span>Профиль</span><b id="source-profile">—</b></div>
                 <div class="source-line"><span>Режим</span><b id="source-mode">—</b></div>
                 <div class="source-line"><span>Последняя проверка</span><b id="last-check">—</b></div>
-                <div class="source-line"><span>Контроль входа в Пульс (Brave)</span><b id="extension-status">Не подключено</b></div>
+                <div class="source-line"><span>Контроль входа (Яндекс Браузер / Brave)</span><b id="extension-status">Не подключено</b></div>
                 <div class="source-line"><span>Последняя проверка входа</span><b id="extension-last">—</b></div>
                 <a class="button neutral small space-top" id="extension-login" target="_blank" rel="noopener noreferrer">Войти в Пульс</a>
                 <div class="form-actions space-top" style="flex-wrap:wrap">
@@ -336,12 +336,14 @@
                   <button class="button neutral small" id="extension-pair" type="button">Скопировать ключ</button>
                 </div>
                 <div id="extension-guide" class="copy-help space-top" hidden>
-                  <p><b>Установка в Brave / Chrome</b></p>
-                  <p>1. Скачай ZIP и распакуй архив. Внутри будет папка <code>t-invest-pulse-extension</code>.</p>
-                  <p>2. Открой <code>brave://extensions/</code> (для Chrome — <code>chrome://extensions/</code>).</p>
-                  <p>3. Включи «Режим разработчика», нажми «Загрузить распакованное» и выбери распакованную папку.</p>
-                  <p>4. В админке скопируй ключ, а в настройках расширения введи адрес этой панели, свой логин и ключ. Автор выбирается только в админке.</p>
-                  <p>5. Нажми в расширении «Проверить связь», затем «Войти в Пульс». Оставь открытую вкладку; вход проверяется каждые 2 минуты.</p>
+                  <p><b>Установка в Яндекс Браузер</b></p>
+                  <p>1. Скачай ZIP и распакуй архив в постоянную папку <code>t-invest-pulse-extension</code>.</p>
+                  <p>2. Открой в Яндекс Браузере <code>browser://extensions</code>.</p>
+                  <p>3. Включи «Режим разработчика» и нажми «Загрузить распакованное расширение». Выбери папку, где лежит <code>manifest.json</code>.</p>
+                  <p>4. Скопируй ключ из своего кабинета. В расширении укажи URL панели, свой логин и ключ. Автор выбирается только в админке.</p>
+                  <p>5. Нажми «Проверить связь» → «Войти и начать». Авторизуйся в Пульсе и оставь вкладку «Сделки» открытой.</p>
+                  <p>6. История за 24 часа и 30 дней загрузится постепенно. Прогресс виден в разделах «Сделки» и «Мониторинг».</p>
+                  <p class="muted">Для Brave установка аналогична через <code>brave://extensions/</code>. При обновлении расширения замени файлы и нажми «Обновить» в списке расширений.</p>
                   <p class="muted">Браузеры не разрешают сайтам устанавливать распакованные расширения автоматически. Включение реальных заявок к этому расширению не относится.</p>
                 </div>
                 <p class="muted space-top" id="extension-note">Расширение контролирует только авторизацию раз в 2 минуты. Автор выбирается в админке. При потере входа придёт одно уведомление Telegram.</p>
@@ -504,7 +506,7 @@
     el('open-pulse').addEventListener('click', openConnectDialog);
     async function refreshAuthor(){
       if (extensionMode) {
-        el('source-message').textContent='Данные обновляются расширением. Открой Сделки автора в Brave и обнови вкладку F5.';
+        el('source-message').textContent='Данные обновляются расширением. Открой Сделки автора в браузере и обнови вкладку F5.';
         await refresh();
         return;
       }
@@ -530,7 +532,7 @@
         if (!navigator.clipboard?.writeText) throw Error('В этом браузере недоступен буфер обмена');
         await navigator.clipboard.writeText(result.key);
         el('extension-note').textContent = 'Ключ скопирован. Кабинет: ' + result.client +
-          '. Вставь его в расширение Brave, затем нажми «Проверить связь». Не отправляй ключ в переписке.';
+          '. Вставь его в расширение браузера, затем нажми «Проверить связь». Не отправляй ключ в переписке.';
       } catch(error) { el('extension-note').textContent = 'Не удалось скопировать ключ: ' + error.message; }
       finally { button.disabled = false; }
     });
@@ -555,7 +557,7 @@
         :month.status==='error'?month.message||'История не загрузилась':month.status==='ready'?(month.skipped?.length?`${month.message}. Пропущены: ${month.skipped.slice(0,5).join(', ')}${month.skipped.length>5?' и другие':''}.`:'Загружено за последние 30 дней · только сделки не старше 24 часов можно повторить'):'Месячная история не загружена; вернись к 24 часам и открой её снова')
         :extensionMode?(latestPulseState?.extension_trades?.history_truncated?'История очень большая: показана только часть операций.'
           :history.complete?'История за последние 24 часа проверена · '+progress+' инструментов.'
-          :'Загружаем историю за 24 часа через Brave: проверено '+progress+' из '+target+' инструментов. Найденные сделки отображаются по мере загрузки.'):'';
+          :'Загружаем историю за 24 часа через браузер: проверено '+progress+' из '+target+' инструментов. Найденные сделки отображаются по мере загрузки.'):'';
 
       if(!items.length){box.className='empty';box.textContent=monthView?(month.status==='ready'?'За последние 30 дней опубликованных сделок не найдено':'Загружаем историю за 30 дней через расширение…'):(extensionMode&&!history.complete?'Идёт загрузка истории через Brave. Доступные сделки появятся здесь по мере получения.':'За последние 24 часа опубликованных сделок не найдено');return;}
       box.className='table-wrap';const table=document.createElement('table');
@@ -707,7 +709,7 @@
       if (state.extension_mode) {
         const deals=state.extension_trades||{},auth=state.extension_source||{};
         if(deals.last_status==='ok'&&deals.active)
-          return {label:'Сделки из Brave · '+(deals.instruments?.length||0)+' инструментов',
+          return {label:'Сделки из браузера · '+(deals.instruments?.length||0)+' инструментов',
             detail:'Последний отчёт: '+fmtDate(deals.last_report)+'. Серверный браузер не используется.'};
         if(auth.last_status==='stopped'||deals.last_status==='stopped')
           return {label:'Расширение выключено',detail:'Включи мониторинг в Brave, если хочешь получать сделки.',warning:true};
