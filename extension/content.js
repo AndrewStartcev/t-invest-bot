@@ -168,6 +168,10 @@
     } finally {clearTimeout(timer);}
   }
 
+  async function setStage(stage, extra={}) {
+    await chrome.storage.local.set({scan_stage:stage,scan_stage_at:new Date().toISOString(),...extra});
+  }
+
   async function poll(elapsed) {
     if (busy) return 5000;
     busy = true;
@@ -175,10 +179,21 @@
     const interval = cfg.interval === 3 ? 3000 : 5000;
     let profileUrl = null;
     try {
-      if (!cfg.enabled || !operationsTab()) return interval;
+      if (!cfg.enabled) {
+        await setStage("Мониторинг выключен");
+        return interval;
+      }
+      if (!operationsTab()) {
+        await setStage("Ожидаем вкладку «Сделки» выбранного автора");
+        return interval;
+      }
+      await setStage("Проверяем выбранного автора в админке");
       const config=await request({kind:"config"});
       profileUrl=config.profile_url;
-      if(selectedNickname(profileUrl)!==selectedNickname(location.href)) return interval;
+      if(selectedNickname(profileUrl)!==selectedNickname(location.href)) {
+        await setStage("Открыта вкладка другого автора");
+        return interval;
+      }
       if(!instrumentUrl||!nicknameUrl){
         const observed=await request({kind:"get_instrument_url"});
         instrumentUrl=observed.instrument_url;
@@ -186,12 +201,15 @@
         safeHeaders=observed.headers||{};
       }
       if(!instrumentUrl||!nicknameUrl){
+        await setStage("Ожидаем API списка инструментов от Пульса");
         if(Date.now()-mountedAt>20000)
           throw Error("Пульс не отправил API запросы. Открой Сделки автора и нажми F5.");
         return interval;
       }
+      await setStage("Подтверждаем автора и вход в банк");
       await verifyAuthor();
       await profileCheck();
+      await setStage("Загружаем инструменты из Пульса");
       const list=await instruments();
       const saved=config.counts||{};
       const changed=[];
@@ -208,16 +226,19 @@
           changed.push(...(await history(item.ticker,item.classCode,delta)).reverse());
         }
       }
+      await setStage("Отправляем "+list.length+" инструментов в админку");
       const ack=await request({kind:"report",report:{
         kind:"trades",status:"ok",profile_url:profileUrl,
         instruments:list,events:changed
       }});
       if(!ack?.ok)throw Error("Сервер не подтвердил сохранение");
+      await setStage("Данные получены · "+list.length+" инструментов",
+                     {last_success_at:new Date().toISOString(),last_instrument_count:list.length,last_error:""});
       consecutiveFailures=0;
       return interval;
     }catch(error){
       consecutiveFailures++;
-      await chrome.storage.local.set({last_error:String(error.message||error).slice(0,200)});
+      await setStage("Ошибка загрузки данных",{last_error:String(error.message||error).slice(0,200)});
       if(profileUrl&&selectedNickname(profileUrl)===selectedNickname(location.href)){
         const status=errorStatus(error);
         try{
