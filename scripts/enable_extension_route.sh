@@ -28,8 +28,8 @@ if ! nginx -t; then
   echo "Существующий nginx не проходит проверку; конфигурация не менялась." >&2
   exit 1
 fi
-if grep -Fq 'location = /api/extension/report {' "$CONFIG"; then
-  echo "Маршрут расширения уже присутствует в nginx. Перезагрузка не нужна."
+if grep -Fq 'location = /api/extension/report {' "$CONFIG" && grep -Fq 'client_max_body_size 2m;' "$CONFIG"; then
+  echo "Маршрут расширения уже поддерживает 2 МБ. Перезагрузка не нужна."
   exit 0
 fi
 
