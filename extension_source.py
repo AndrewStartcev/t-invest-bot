@@ -207,6 +207,97 @@ class ExtensionStore:
             self._save(state)
         return {"ok": True, "read_only": True, "duplicate": False, "accepted": len(parsed)}
 
+    def month_progress(self, expected_profile):
+        """Source-author scoped, resumable 30-day scan progress."""
+        profile = canonical_profile_url(expected_profile)
+        with self.lock:
+            state = self._read()
+        if state.get("profile_url") != profile:
+            return {"done": [], "offsets": {}, "completed": 0, "target_total": 0,
+                    "complete": False, "loaded": 0, "status": "waiting"}
+        done = state.get("month_done", [])
+        cutoff = datetime.now(timezone.utc) - timedelta(days=30)
+        targets = set()
+        for item in state.get("instruments", []):
+            if not isinstance(item, dict) or item.get("totalOperationsCount", 0) <= 0:
+                continue
+            when = item.get("maxTradeDateTime")
+            try:
+                if when:
+                    stamp = datetime.fromisoformat(when.replace("Z", "+00:00"))
+                    if stamp.tzinfo is not None and stamp < cutoff:
+                        continue
+            except (TypeError, ValueError):
+                pass
+            targets.add(_instrument_key(item["ticker"], item["classCode"]))
+        completed = len(set(done).intersection(targets))
+        return {"done": done, "offsets": state.get("month_offsets", {}),
+                "completed": completed, "target_total": len(targets),
+                "complete": completed == len(targets),
+                "loaded": len(state.get("month_entries", [])),
+                "status": "ready" if completed == len(targets) else "loading"}
+
+    def month_entries(self, expected_profile):
+        with self.lock:
+            state = self._read()
+        if state.get("profile_url") != canonical_profile_url(expected_profile):
+            return []
+        return state.get("month_entries", [])
+
+    def accept_month_history(self, report, expected_profile):
+        """Append one ordered 30-day page; only complete pages advance progress.
+
+        Independent from the live watermarks, historical Telegram notifications,
+        and any broker orders. Replayed acknowledged page indexes are no-ops.
+        """
+        if not isinstance(report, dict) or report.get("kind") != "month_history":
+            raise ValueError("Некорректный пакет месячной истории")
+        if canonical_profile_url(report.get("profile_url")) != canonical_profile_url(expected_profile):
+            raise ValueError("Месячная история другого автора")
+        ticker, class_code = report.get("ticker"), report.get("classCode")
+        key = _instrument_key(ticker, class_code)
+        index = report.get("batch_index")
+        complete = report.get("complete")
+        events = report.get("events")
+        if type(index) is not int or not 0 <= index < 10000 or type(complete) is not bool:
+            raise ValueError("Неверный номер пакета истории")
+        if not isinstance(events, list) or len(events) > 200:
+            raise ValueError("Пакет истории не должен превышать 200 операций")
+        parsed = [_trade(event) for event in events]
+        if any(event["ticker"] != ticker or event["classCode"] != class_code for event in parsed):
+            raise ValueError("История содержит сделку чужого инструмента")
+        now = datetime.now(timezone.utc)
+        cutoff = now - timedelta(days=31)  # scan and delivery latency
+        for event in parsed:
+            stamp = datetime.fromisoformat(event["tradeDateTime"].replace("Z", "+00:00"))
+            if not cutoff <= stamp <= now + timedelta(minutes=5):
+                raise ValueError("Сделка находится вне месячной истории")
+        with self.lock:
+            state = self._read()
+            if state.get("profile_url") != canonical_profile_url(expected_profile) or state.get("last_status") != "ok":
+                raise ValueError("Нет подтверждённого снимка текущего автора")
+            instruments = {_instrument_key(row["ticker"], row["classCode"])
+                           for row in state.get("instruments", [])}
+            if key not in instruments:
+                raise ValueError("Инструмент не принадлежит текущему автору")
+            done = state.setdefault("month_done", [])
+            offsets = state.setdefault("month_offsets", {})
+            if key in done or index < offsets.get(key, 0):
+                return {"ok": True, "read_only": True, "duplicate": True, "accepted": 0}
+            if index != offsets.get(key, 0):
+                raise ValueError("Пропущена страница месячной истории")
+            existing = state.setdefault("month_entries", [])
+            if len(existing) + len(parsed) > 20000:
+                raise ValueError("История превышает 20 000 записей; нужен архив по страницам")
+            existing.extend(parsed)
+            offsets[key] = index + 1
+            if complete:
+                done.append(key)
+                offsets.pop(key, None)
+            self._save(state)
+        return {"ok": True, "read_only": True, "accepted": len(parsed),
+                "complete": complete, "next_batch": index + 1}
+
     def public_snapshot(self, expected_profile):
         profile = canonical_profile_url(expected_profile)
         with self.lock:
@@ -241,6 +332,8 @@ class ExtensionStore:
                 counts = current.get("counts", {}) if same else {}
             return {"ok": True, "read_only": True, "profile_url": profile,
                     "counts": counts, "history_done": current.get("history_done", []) if same else [],
+                    "month_done": current.get("month_done", []) if same else [],
+                    "month_offsets": current.get("month_offsets", {}) if same else {},
                     "reset_baseline": not same or not counts}
         if status not in VALID_STATUS:
             raise ValueError("Неизвестный статус")
@@ -290,6 +383,9 @@ class ExtensionStore:
                 data["history_done"] = []
                 data["history_entries"] = []
                 data["history_truncated"] = False
+                data["month_done"] = []
+                data["month_offsets"] = {}
+                data["month_entries"] = []
                 data["recent"] = []
             if status == "ok":
                 if not counts and before:
