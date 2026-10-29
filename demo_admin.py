@@ -1722,21 +1722,25 @@ class Handler(BaseHTTPRequestHandler):
             self.respond(200, {"status": "ok", "server_mode": server_mode()})
         elif self.path == "/api/state":
             with LOCK:
-                authenticated = AUTH["status"] == "authenticated"
+                dashboard = extension_dashboard()
+                authenticated = dashboard["auth"]["status"] == "authenticated"
                 self.respond(200, {"approvals": APPROVALS.public(), "asset_consents": list(APPROVALS.consents),
                                    "investor_portfolio": (INVESTOR_PORTFOLIO.copy() if authenticated and INVESTOR_PORTFOLIO.get("profile_url") == load_settings()["profile_url"]
                                                           else portfolio_unavailable(load_settings()["profile_url"], "Портфель выбранного автора ещё не проверен")),
-                                   "settings": load_settings(), "extension_source": EXTENSION_SOURCE.public_status(), "token_configured": bool(telegram_token()),
+                                   "settings": load_settings(), "extension_mode": True,
+                                   "extension_source": EXTENSION_SOURCE.public_status(),
+                                   "extension_trades": EXTENSION_TRADES.public_snapshot(load_settings()["profile_url"]),
+                                   "token_configured": bool(telegram_token()),
                                    "events": EVENTS, "demo_positions": POSITIONS,
                                    "broker_token_configured": bool(broker_token()), "broker": BROKER.copy(),
                                    "trade_token_configured": bool(trade_token()), "trading": TRADING.copy(),
                                    "real_orders": list(REAL_ORDERS.values())[-30:], "real_order_count": len(REAL_ORDERS),
-                                   "monitor": MONITOR.copy() if authenticated else {**MONITOR, "instrument_count": 0, "instruments": []},
-                                   "auth": ({"status": AUTH["status"], "message": MONITOR["message"] if MONITOR["status"] in {"error", "checking"} else "Источник подключён" if authenticated else "Источник подключает владелец сервиса. Вход клиента в банк не требуется."} if shared_source() else AUTH.copy()),
+                                   "monitor": dashboard["monitor"],
+                                   "auth": dashboard["auth"],
                                    "server_mode": server_mode(), "shared_source": shared_source(),
                                    "browser_ui_url": "/desktop/vnc.html?autoconnect=1&resize=scale&path=desktop/websockify&view_only=false" if server_mode() and not shared_source() else None,
-                                   "today": TODAY if authenticated else [],
-                                   "month": MONTH.copy() if authenticated else {"status": "idle", "items": [], "processed": 0, "total": 0, "message": "", "loaded_at": None}})
+                                   "today": dashboard["today"],
+                                   "month": dashboard["month"]})
         else:
             self.respond(404, {"error": "Не найдено"})
 
@@ -1752,14 +1756,22 @@ class Handler(BaseHTTPRequestHandler):
                 return
             try:
                 length = int(self.headers.get("Content-Length", "0"))
-                if not 0 < length <= 128 * 1024:
+                if not 0 < length <= 2 * 1024 * 1024:
                     raise ValueError("Некорректный размер отчёта")
                 report = json.loads(self.rfile.read(length))
                 if report == {"kind": "config"}:
-                    self.respond(200, {"ok": True, "read_only": True,
-                                       "profile_url": canonical_profile_url(load_settings()["profile_url"])})
+                    current = EXTENSION_TRADES.accept({"status":"test"}, load_settings()["profile_url"])
+                    self.respond(200, current)
                     return
-                result = EXTENSION_SOURCE.accept_auth(report, alert=extension_alert)
+                if report.get("kind") == "trades":
+                    if report.get("status") != "ok":
+                        raise ValueError("Отчёт по сделкам должен быть полным")
+                    result = EXTENSION_TRADES.accept(report, load_settings()["profile_url"],
+                                                     emit=extension_record_trade)
+                    EXTENSION_SOURCE.accept_auth({"kind":"auth_status","status":"authenticated"},
+                                                  alert=extension_alert)
+                else:
+                    result = EXTENSION_SOURCE.accept_auth(report, alert=extension_alert)
                 self.respond(200, result)
             except (ValueError, TypeError, PulseError) as error:
                 self.respond(422, {"error": str(error)[:240]})
@@ -2052,8 +2064,8 @@ def main() -> None:
     if role not in {"source", "client"}:
         threading.Thread(target=run_router, args=(lambda: [(None, {"token": telegram_token() if load_settings()["policy"]["telegram_controls"] else "", "chat_id": load_settings()["chat_id"]})],
                          lambda _, query: telegram_callback(query), DATA_DIR / "telegram-router-state.json"), daemon=True).start()
-    threading.Thread(target=remote_monitor_loop if role == "client" else monitor_loop,
-                     name="pulse-monitor", daemon=True).start()
+    threading.Thread(target=extension_watchdog_loop,
+                     name="pulse-extension-watchdog", daemon=True).start()
     if role != "source":
         threading.Thread(target=reconcile_loop, name="broker-reconcile", daemon=True).start()
         threading.Thread(target=broker_monitor_loop, name="broker-portfolio", daemon=True).start()
