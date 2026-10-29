@@ -13,7 +13,7 @@ jobs:
         with:
           python-version: "3.11"
       - name: Check Python syntax
-        run: python -m compileall -q demo_admin.py tenant_gateway.py extension_source.py extension_archive.py scripts/render_nginx.py
+        run: python -m compileall -q demo_admin.py tenant_gateway.py extension_source.py extension_archive.py pulse_auth_monitor.py scripts/render_nginx.py
       - name: Run read-only source tests
         run: python -m unittest discover -s tests -p 'test_extension_*.py' -v
       - name: Existing Python regression suite
@@ -32,6 +32,9 @@ jobs:
           node --check extension/background.js
           node --check extension/content.js
           node --check extension/popup.js
+      - name: Guard against trade polling by extension
+        run: |
+          node -e "const fs=require('fs'); const content=fs.readFileSync('extension/content.js','utf8'); if(/totalOperationsCount|operation\\/instrument|nextCursor/.test(content)) process.exit(1)"
       - name: Validate MV3 manifest
         run: |
           node -e "const m=require('./extension/manifest.json'); if(m.manifest_version!==3 || !m.background.service_worker) process.exit(1)"
