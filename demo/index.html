@@ -707,6 +707,9 @@
       if(!consents.children.length)consents.textContent='Разрешений без подтверждения нет';
     }
     function pulseDisplayStatus(state){
+      if (state.extension_mode && (state.extension_delivery?.manual_review||0)>0)
+        return {label:'Нужна сверка обработки сигналов',
+                detail:'Есть сигналы с неопределённым результатом после сбоя. Автоматическое повторение запрещено; проверь журнал брокера и данные кабинета.',error:true};
       if (state.extension_mode) {
         const deals=state.extension_trades||{},auth=state.extension_source||{};
         if(deals.last_status==='ok'&&deals.active)
