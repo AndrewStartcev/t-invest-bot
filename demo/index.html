@@ -449,7 +449,8 @@
       el('startup-message').hidden = true;
       authStatus = auth.status;
       const ready = auth.status === 'authenticated';
-      const showDialog = !sharedSource && !ready && !authDismissed && !extensionConnected;
+      const extensionHasReports=Boolean(latestPulseState?.extension_source?.last_report);
+      const showDialog = !sharedSource && !ready && !authDismissed && !extensionHasReports;
       el('auth-screen').hidden = !showDialog;
       el('admin-app').inert = showDialog;
       document.body.style.overflow = showDialog ? 'hidden' : '';
