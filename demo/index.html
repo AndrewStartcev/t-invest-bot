@@ -543,8 +543,13 @@
       el('month-button').textContent=monthView?'Вернуться к 24 часам':'Посмотреть за месяц';
       el('today-count').textContent=monthView&&month.status==='loading'?'Загрузка…':items.length+' сделок';
       const monthMessage=el('month-message');monthMessage.className=month.status==='error'||month.skipped?.length?'toast error space-top':'toast space-top';
-      monthMessage.textContent=monthView?(month.status==='loading'?month.message||'Читаем историю за 30 дней…':month.status==='error'?month.message||'История не загрузилась':month.status==='ready'?(month.skipped?.length?`${month.message}. Пропущены: ${month.skipped.slice(0,5).join(', ')}${month.skipped.length>5?' и другие':''}.`:'Загружено за последние 30 дней · только сделки не старше 24 часов можно повторить'):'Месячная история не загружена; вернись к 24 часам и открой её снова'):'';
-      if(!items.length){box.className='empty';box.textContent=monthView?(month.status==='ready'?(month.skipped?.length?'Доступных сделок за 30 дней не найдено; часть инструментов пропущена':'За последние 30 дней опубликованных сделок не найдено'):month.status==='error'?'Загрузка не удалась. Вернись к 24 часам и нажми «Посмотреть за месяц» ещё раз.':'Загружаем сделки автора за 30 дней…'):'За последние 24 часа опубликованных сделок не найдено';return;}
+      const history=latestPulseState?.history_progress||{};
+      const progress=Number(history.completed||0),target=Number(history.target_total||0);
+      monthMessage.textContent=monthView?(month.status==='loading'?month.message||'Читаем историю за 30 дней…':month.status==='error'?month.message||'История не загрузилась':month.status==='ready'?(month.skipped?.length?`${month.message}. Пропущены: ${month.skipped.slice(0,5).join(', ')}${month.skipped.length>5?' и другие':''}.`:'Загружено за последние 30 дней · только сделки не старше 24 часов можно повторить'):'Месячная история не загружена; вернись к 24 часам и открой её снова')
+        :extensionMode?(history.complete?'История за последние 24 часа проверена · '+progress+' инструментов.'
+          :'Загружаем историю за 24 часа через Brave: проверено '+progress+' из '+target+' инструментов. Найденные сделки отображаются по мере загрузки.'):'';
+
+      if(!items.length){box.className='empty';box.textContent=monthView?(month.status==='ready'?(month.skipped?.length?'Доступных сделок за 30 дней не найдено; часть инструментов пропущена':'За последние 30 дней опубликованных сделок не найдено'):month.status==='error'?'Загрузка не удалась. Вернись к 24 часам и нажми «Посмотреть за месяц» ещё раз.':'Загружаем сделки автора за 30 дней…'):(extensionMode&&!history.complete?'Идёт загрузка истории через Brave. Доступные сделки появятся здесь по мере получения.':'За последние 24 часа опубликованных сделок не найдено');return;}
       box.className='table-wrap';const table=document.createElement('table');
       const head=document.createElement('thead');head.innerHTML='<tr><th>Время</th><th>Инструмент</th><th>Действие</th><th>Цена</th><th>Операция</th></tr>';table.append(head);
       const body=document.createElement('tbody');
@@ -605,15 +610,17 @@
       el('history-panel').hidden=false;el('history-title').textContent='История · '+selected.showName;el('history-more').hidden=true;
       if(!more)el('history-list').textContent='Загружаем историю…';
       if(extensionMode){
-        const rows=(latestPulseState?.extension_trades?.recent||[]).filter(item=>
-          item.ticker===selected.ticker&&item.classCode===selected.classCode);
+        const rows=today.filter(item=>
+          item.ticker===selected.ticker&&item.classCode===selected.classCode).map(item=>({
+            tradeDateTime:item.tradeDateTime,action:item.action,averagePrice:item.price
+          }));
         const box=el('history-list');box.replaceChildren();
         for(const item of rows){
           const line=document.createElement('div');line.className='source-line';
           line.textContent=fmtDate(item.tradeDateTime)+' · '+(item.action==='buy'?'Покупка':'Продажа')+
             ' · '+item.averagePrice;box.append(line);
         }
-        if(!rows.length)box.textContent='История появится после новых сделок, переданных расширением.';
+        if(!rows.length)box.textContent='История за 24 часа ещё загружается либо сделок за этот период нет.';
         el('history-more').hidden=true;
         return;
       }
