@@ -189,9 +189,10 @@ class ServerTests(unittest.TestCase):
                     request("/source-admin/api/start", True, key, "https://evil.example")
                 self.assertEqual(failure.exception.code, 403)
                 self.assertTrue(requests.empty())
-                with request("/source-admin/api/start", True, key) as response:
-                    self.assertEqual(response.status, 202)
-                self.assertEqual(requests.get_nowait()["action"], "auth_start")
+                with self.assertRaises(HTTPError) as disabled:
+                    request("/source-admin/api/start", True, key)
+                self.assertEqual(disabled.exception.code, 409)
+                self.assertTrue(requests.empty())
                 with self.assertRaises(HTTPError) as failure:
                     request("/source-admin/api/broker/connect", True, key)
                 self.assertEqual(failure.exception.code, 404)
