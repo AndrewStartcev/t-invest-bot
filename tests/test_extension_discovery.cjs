@@ -18,7 +18,7 @@ async function browser(options={}){
         {ok:true,data:{profile_url:`https://www.tbank.ru/invest/social/profile/${author}/`,counts:{}}});
       if(msg.kind==='resolve_redirect'){
         let next=null;
-        if(mode==='redirect-prefix')next=msg.url.replace('/mybank/api/invest/','/api/invest/');
+        if(mode==='redirect-prefix')next=msg.url.replace('/mybank/api/social-api-gateway/','/api/invest/');
         if(mode==='redirect-safe')next=msg.url.endsWith('/')?msg.url:msg.url+'/';
         if(mode==='redirect-foreign')next='https://evil.test'+new URL(msg.url).pathname;
         if(mode==='redirect-login')next=location.origin+'/login/';
@@ -41,6 +41,11 @@ async function browser(options={}){
       if(mode==='redirect-prefix' && u.pathname.startsWith('/mybank/'))return {type:'opaqueredirect',ok:false,status:0};
       if(mode?.startsWith('redirect-') && mode!=='redirect-prefix' && !u.pathname.endsWith('/'))return {type:'opaqueredirect',ok:false,status:0};
       if(mode==='redirect')return {type:'opaqueredirect',ok:false,status:0};
+      if(mode==='canonical' && !u.pathname.startsWith('/mybank/api/social-api-gateway/social/v1/profile/'))
+        return {ok:false,status:404,url:u.href,json:async()=>({error:'old route'})};
+      if(mode==='canonical-query' && (!u.pathname.startsWith('/mybank/api/social-api-gateway/social/v1/profile/') || u.searchParams.get('sessionId')!=='local-secret'))
+        return {ok:false,status:404,url:u.href,json:async()=>({error:'route/query missing'})};
+      if(options.beforeFetch)await options.beforeFetch({url:u,listener});
       if(mode==='network')throw TypeError('Failed to fetch');
       if(mode==='navigate'){location.pathname='/invest/pulse/profile/Bob/operations/';mode='normal';}
       if(mode==='switch-key'){state.key='new-private-key';mode='normal';}
@@ -62,6 +67,14 @@ async function browser(options={}){
     assert.equal(b.calls.length,2,'bootstrap nickname + instrument without capture or F5');
     assert(!JSON.stringify(b.reports).includes('private-pairing'));
   }
+  const canonical=await browser({mode:'canonical'});assert.equal(canonical.diag().code,'ok');
+  assert(canonical.calls.every(u=>u.pathname.startsWith('/mybank/api/social-api-gateway/')));
+  const missedNickname=await browser({mode:'canonical-query',observed:{
+    instrument_url:'https://www.tbank.ru/mybank/api/social-api-gateway/social/v1/profile/uuid-Alice/instrument?sessionId=local-secret&limit=30'}});
+  assert.equal(missedNickname.diag().code,'ok');
+  assert.equal(missedNickname.calls[0].pathname,'/mybank/api/social-api-gateway/social/v1/profile/nickname/Alice');
+  assert.equal(missedNickname.calls[0].searchParams.get('limit'),'30');
+  assert(!JSON.stringify(missedNickname.diag()).includes('local-secret'));
   const recovered=await browser({resources:[
     'https://www.tbank.ru/mybank/api/invest/social/v1/profile/uuid-Alice/instrument?sessionId=local-secret']});
   assert.equal(recovered.diag().code,'ok');assert.equal(recovered.calls[0].searchParams.get('sessionId'),'local-secret');
@@ -89,6 +102,17 @@ async function browser(options={}){
     assert.equal(b.reports.some(r=>r.kind==='auth_status'),mode==='401');
     b.setMode('normal');await b.next();assert.equal(b.diag().code,'ok','recover '+mode);
   }
+  const during=[];
+  const recovering=await browser({mode:'404',beforeFetch({listener}){
+    let d;listener({kind:'diagnose'},{},v=>d=v);during.push(d);
+  }});
+  assert.equal(recovering.diag().lastFailure.http,404);
+  assert(recovering.diag().lastFailure.request.endsWith('/nickname/Alice'));
+  recovering.setMode('normal');await recovering.next();
+  assert.equal(during.at(-1).code,'checking');assert.equal(during.at(-1).http,null);
+  assert.equal(during.at(-1).message,'');
+  assert(during.at(-1).lastFailure.request.endsWith('/nickname/Alice'));
+  assert(during.at(-1).request.endsWith('/uuid-Alice/instrument'));
   const wrong=await browser({observed:{nickname_url:'https://www.tbank.ru/mybank/api/invest/social/v1/profile/nickname/Bob',
     instrument_url:'https://www.tbank.ru/mybank/api/invest/social/v1/profile/uuid-Bob/instrument'}});
   assert.equal(wrong.diag().code,'ok');assert(wrong.calls.at(-1).pathname.includes('/uuid-Alice/'));

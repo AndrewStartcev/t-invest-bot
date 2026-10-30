@@ -100,6 +100,9 @@ chrome.webRequest.onBeforeSendHeaders.addListener(async details=>{
   for(const entry of details.requestHeaders||[])
     if(["x-app-name","x-app-version","x-platform"].includes(entry.name.toLowerCase()))
       headers[entry.name]=entry.value;
+  // A bootstrap/replay request may have no app headers. It must not erase
+  // useful headers observed on the site's own successful request sequence.
+  if(!Object.keys(headers).length)return;
   safeHeaders.set(details.tabId,headers);
   await chrome.storage.session.set({["safe_headers_"+details.tabId]:headers});
   chrome.tabs.sendMessage(details.tabId,{kind:"safe_headers",headers}).catch(()=>{});

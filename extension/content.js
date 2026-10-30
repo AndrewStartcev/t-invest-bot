@@ -14,6 +14,7 @@
   const failedUrls = new Set();
   let lastAuthFailure=0;
   let contextKey = "", generation = 0;
+  let lastFailure = null;
   let diagnostic = {code:"starting", stage:"Запуск", step:"Подожди несколько секунд"};
   function failure(code, message, step) {
     return Object.assign(Error(message), {code, step});
@@ -407,17 +408,20 @@
     // cookie inspection or guessing of third-party API hosts is needed.
     let nickname = nicknameUrl
       ? checkedApi(nicknameUrl, /\/profile\/nickname\/[^/]+\/?$/)
-      : new URL("/mybank/api/invest/social/v1/profile/nickname/" +
+      : new URL("/mybank/api/social-api-gateway/social/v1/profile/nickname/" +
           encodeURIComponent(pageNickname(location.href)), location.origin);
     if(!nicknameUrl && instrumentUrl) {
       // A missed nickname request can reuse the observed API query locally.
-      nickname.search = checkedApi(instrumentUrl, INSTRUMENT_PATH).search;
-      nickname.searchParams.delete("nextCursor");
+      const observed=checkedApi(instrumentUrl, INSTRUMENT_PATH);
+      observed.pathname=observed.pathname.replace(/\/profile\/[^/]+\/instrument\/?$/,
+        "/profile/nickname/"+encodeURIComponent(pageNickname(location.href)));
+      observed.searchParams.delete("nextCursor");
+      nickname=observed;
     }
     if(decodeURIComponent(nickname.pathname.replace(/\/$/, "").split("/").pop()).toLowerCase()
         !== selectedNickname(location.href)) {
       nicknameUrl = null; instrumentUrl = null;
-      nickname = new URL("/mybank/api/invest/social/v1/profile/nickname/" +
+      nickname = new URL("/mybank/api/social-api-gateway/social/v1/profile/nickname/" +
         encodeURIComponent(pageNickname(location.href)), location.origin);
     }
     const controller = new AbortController();
@@ -459,6 +463,7 @@
   async function poll(elapsed) {
     if (busy) return 5000;
     busy = true;
+    diagnostic={code:"checking",stage:"Начинаем проверку",step:"Проверка выполняется",at:new Date().toISOString()};
     const cfg = await chrome.storage.local.get(["enabled", "interval"]);
     const interval = cfg.interval === 3 ? 3000 : 5000;
     let profileUrl = null, pollPage = location.href, pollContext = "";
@@ -561,6 +566,8 @@
         if(failedUrls.size>32)failedUrls.delete(failedUrls.values().next().value);
         instrumentUrl=null; nicknameUrl=null; lastIdentityCheck=0;
       }
+      lastFailure={code:diagnostic.code,http:diagnostic.http,message:diagnostic.message,
+        request:diagnostic.request||null,stage:diagnostic.stage,at:new Date().toISOString()};
       await setStage("Ошибка загрузки данных",{last_error:String(error.message||error).slice(0,200)});
       if(!dashboard && location.href===pollPage && profileUrl&&selectedNickname(profileUrl)===selectedNickname(location.href)){
         const status=errorStatus(error);
@@ -587,6 +594,7 @@
   chrome.runtime.onMessage.addListener((message, sender, reply) => {
     if(message?.kind === "diagnose") {
       reply({code:diagnostic.code, stage:diagnostic.stage, step:diagnostic.step,
+        lastFailure,
         at:diagnostic.at, message:diagnostic.message||"", http:diagnostic.http || null,
         request:diagnostic.request||null, requestAt:diagnostic.requestAt||null,
         observedApi:[...new Set(pageApiResources().map(u=>u.origin+" · "+

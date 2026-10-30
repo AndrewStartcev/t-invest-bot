@@ -69,6 +69,11 @@ async function showDiagnostics(){
         "Запрос: "+(s.request||"ещё не отправлен"),
         "API автора / инструментов / подтверждение: "+[s.nickname,s.instrument,s.verified].map(v=>v?"да":"нет").join(" / "),
         "Действие: "+s.step,"Проверка: "+(s.at?new Date(s.at).toLocaleTimeString("ru-RU"):"запускается"));
+      if(s?.lastFailure) {
+        const f=s.lastFailure;
+        lines.push("Последний завершённый сбой: "+f.code+" · "+new Date(f.at).toLocaleTimeString("ru-RU"),
+          f.stage+" · "+f.message,"Запрос сбоя: "+(f.request||"API ещё не вызывался"));
+      }
       if(s?.observedApi?.length) lines.push("API, загруженные вкладкой: "+s.observedApi.join("; "));
       if(tab.network?.redirectHost) lines.push("Редирект API: HTTP "+tab.network.status+" → хост "+tab.network.redirectHost);
       if(tab.network?.requestPath) lines.push("Сетевое событие: "+tab.network.requestPath+" · "+new Date(tab.network.at).toLocaleTimeString("ru-RU"));

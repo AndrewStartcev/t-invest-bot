@@ -31,6 +31,8 @@ async function msg(message,sender={tab:tabs[0]}){
   const captured=await msg({kind:'get_instrument_url'});
   assert(captured.ok);assert(!captured.data.instrument_url.includes('nextCursor'));
   assert(!JSON.stringify(captured).includes('SECRET'));
+  await events.headers({tabId:7,url:base,requestHeaders:[]});
+  assert.equal((await msg({kind:'get_instrument_url'})).data.headers['X-App-Name'],'invest','replay must not erase captured app headers');
   worker(); // MV3 service worker restart: session cache survives.
   assert.equal((await msg({kind:'get_instrument_url'})).data.instrument_url,captured.data.instrument_url);
   await events.complete({tabId:7,url:base.replace('www.tbank.ru','evil.test'),statusCode:200});
