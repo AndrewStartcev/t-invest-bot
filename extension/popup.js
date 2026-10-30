@@ -31,7 +31,7 @@ async function showRuntime(){
   if(!current.enabled) status("⚠️ Передача сделок выключена. Поставь галочку и сохрани настройки.",true);
   else if(current.last_error) status("Ошибка передачи сделок: "+current.last_error,true);
   else if(current.last_success_at) status("✅ Сделки передаются в админку. "+current.last_instrument_count+" инструментов.");
-  else status("Кабинет подключён, но первый снимок сделок ещё не получен. Открой «Сделки» в Brave и обнови F5.");
+  else status("Кабинет подключён по ключу, но данные ещё не получены. Открой сделки выбранного автора и обнови страницу F5.");
 }
 async function settings(){
   const endpoint=el("endpoint").value.trim().replace(/\/$/,"");
@@ -39,15 +39,16 @@ async function settings(){
   if(!el("config").reportValidity()) throw Error("Проверь поля подключения");
   const old=await chrome.storage.local.get("enabled");
   if(old.enabled && !el("enabled").checked) await request("stop");
-  await chrome.storage.local.set({endpoint,client:el("client").value.trim(),
+  await chrome.storage.local.set({endpoint,
     key:el("key").value.trim(),interval:Number(el("interval").value),enabled:el("enabled").checked});
   await chrome.storage.local.remove(["profile_url","baselines"]);
-  status("Настройки сохранены. Сделки поступают из Brave в админку.");
+  status("Настройки сохранены. Кабинет определяется по ключу; банковский вход не изменяется.");
 }
 async function checkConnection(){
   const result=await request("config");
   const target=new URL(result.profile_url);
   el("selected-author").textContent=decodeURIComponent(target.pathname.split("/").filter(Boolean).pop());
+  el("account-name").textContent=result.account_login||"Кабинет по ключу";
   return result;
 }
 el("config").addEventListener("submit",ev=>{
@@ -67,17 +68,16 @@ el("open-portfolio").addEventListener("click",async()=>{
 });
 el("open").addEventListener("click",async()=>{
   try{
-    el("enabled").checked=true;
     await settings();
-    await request("open_login");
+    await checkConnection();
+    await request("open_profile");
     await showRuntime();
-    status("Мониторинг включён. Войди в Пульс и обнови вкладку «Сделки» (F5).");
+    status("Открыта страница выбранного автора. Это не вход в Т-Банк. Для передачи сделок включи мониторинг и сохрани настройки.");
   }catch(e){status(e.message,true);}
 });
 (async()=>{
-  const cfg=await chrome.storage.local.get(["endpoint","client","key","interval","enabled","last_status","last_sent_at","last_error"]);
+  const cfg=await chrome.storage.local.get(["endpoint","key","interval","enabled","last_status","last_sent_at","last_error"]);
   el("endpoint").value=cfg.endpoint||"https://invest.argokov.ru";
-  el("client").value=cfg.client||"admin";
   el("key").value=cfg.key||"";
   el("enabled").checked=Boolean(cfg.enabled);
   el("interval").value=String(cfg.interval===3?3:5);
