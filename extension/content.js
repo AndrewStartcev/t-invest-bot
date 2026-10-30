@@ -22,7 +22,7 @@
     const u = new URL(value);
     if(u.origin !== location.origin || u.protocol !== "https:" ||
        !VALID_HOSTS.has(u.hostname) || u.username || u.password ||
-       !u.pathname.startsWith("/mybank/api/invest/") || !pattern.test(u.pathname))
+       !/\/social\/v1\/profile\//.test(u.pathname) || !pattern.test(u.pathname))
       throw failure("api_address", "Неподтверждённый адрес API", "Открой сделки выбранного автора через расширение");
     return u;
   }
@@ -96,16 +96,36 @@
   }
 
   async function fetchPulse(url, signal) {
-    const target=new URL(url);
-    diagnostic.request=target.origin+target.pathname;
-    diagnostic.requestAt=new Date().toISOString();
-    const response=await fetch(target.href, {
-      credentials:"include",cache:"no-store",redirect:"manual",signal,headers:safeHeaders
-    });
-    if(response.type === "opaqueredirect" || (response.status>=300 && response.status<400))
-      throw failure("pulse_redirect", "Банк перенаправляет запрос API",
-        "Проверь адрес перенаправления в диагностике и открываются ли сделки в самой вкладке. Не вводи данные на неизвестном домене");
-    return response;
+    let target=new URL(url);
+    const seen=new Set();
+    const route=u=>u.pathname.match(/\/social\/v1\/profile\/(.+?)\/?$/)?.[1];
+    for(let hop=0;hop<4;hop++) {
+      if(seen.has(target.href))throw failure("pulse_redirect_loop", "Цикл перенаправлений API", "Передай диагностику разработчику");
+      seen.add(target.href);
+      diagnostic.request=target.origin+target.pathname;
+      diagnostic.requestAt=new Date().toISOString();
+      const response=await fetch(target.href, {
+        credentials:"include",cache:"no-store",redirect:"manual",signal,headers:safeHeaders
+      });
+      if(response.type !== "opaqueredirect" && !(response.status>=300 && response.status<400))
+        return response;
+      // Location is hidden by Fetch for opaqueredirect. Resolve it from the
+      // passive webRequest event, without following an unvalidated redirect.
+      let resolved;
+      for(let attempt=0;attempt<3;attempt++) {
+        resolved=await request({kind:"resolve_redirect",url:target.href});
+        if(resolved?.url)break;
+        if(attempt<2)await wait(50);
+      }
+      if(!resolved?.url)throw failure("pulse_redirect", "Не получен адрес перенаправления API", "Повтори проверку; передай диагностику разработчику");
+      const next=new URL(resolved.url,target.href);
+      if(next.origin!==location.origin || next.protocol!=="https:" || next.username || next.password ||
+          !route(target) || route(next)!==route(target))
+        throw failure("pulse_redirect_blocked", "Банк перенаправляет API за пределы исходного маршрута",
+          "Проверь, видны ли сделки в банке. Передай диагностику разработчику; переход не выполнен");
+      target=next;
+    }
+    throw failure("pulse_redirect_limit", "Слишком много перенаправлений API", "Передай диагностику разработчику");
   }
 
   async function api(url, timeoutMs = 9000) {
@@ -421,12 +441,12 @@
         if(capturedId !== id) instrumentUrl = null;
       }
       if(!instrumentUrl) {
-        const target = new URL(nickname.href);
+        const target = new URL(response.url || nickname.href);
         target.pathname = target.pathname.replace(/\/nickname\/[^/]+\/?$/, "/"+encodeURIComponent(id)+"/instrument");
         target.searchParams.delete("nextCursor");
         instrumentUrl = target.href;
       }
-      nicknameUrl = nickname.href;
+      nicknameUrl = response.url || nickname.href;
       lastIdentityCheck = Date.now();
     } finally { clearTimeout(timer); }
   }

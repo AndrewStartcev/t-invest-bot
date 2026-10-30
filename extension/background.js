@@ -6,12 +6,13 @@ const BANKS=new Set(["www.tbank.ru","tbank.ru","www.tbank-online.com","tbank-onl
 const captures=new Map();
 const safeHeaders=new Map();
 const networkState=new Map();
-const API_FILTER={urls:[...BANKS].map(host=>"https://"+host+"/mybank/api/*")};
+const redirects=new Map();
+const API_FILTER={urls:[...BANKS].map(host=>"https://"+host+"/*")};
 function captureUrl(value) {
   try {
     const u=new URL(value);
     return u.protocol==="https:" && BANKS.has(u.hostname) && !u.username && !u.password &&
-      u.pathname.startsWith("/mybank/api/invest/social/v1/profile/") ? u : null;
+      /\/social\/v1\/profile\/(?:nickname\/[^/]+|[^/]+\/instrument|[^/]+\/operation\/instrument\/[^/]+\/[^/]+)\/?$/.test(u.pathname) ? u : null;
   } catch {return null;}
 }
 async function diagnostics() {
@@ -127,6 +128,10 @@ chrome.webRequest.onCompleted.addListener(async details=>{
 
 chrome.webRequest.onBeforeRedirect.addListener(details=>{
   if(details.tabId<0||!captureUrl(details.url))return;
+  const items=redirects.get(details.tabId)||new Map();
+  items.set(details.url,{url:details.redirectUrl,at:Date.now()});
+  if(items.size>16)items.delete(items.keys().next().value);
+  redirects.set(details.tabId,items);
   // Keep query, fragment, credentials and target path out of diagnostics.
   // Even an untrusted target may be displayed as a hostname, never followed.
   let targetHost;
@@ -143,11 +148,12 @@ chrome.webRequest.onErrorOccurred.addListener(details=>{
 },API_FILTER);
 chrome.tabs.onUpdated.addListener((id,change)=>{
   if(!change.url)return;
+  redirects.delete(id);
   captures.delete(id);safeHeaders.delete(id);networkState.delete(id);
   chrome.storage.session.remove(["nickname_tab_"+id,"instrument_tab_"+id,"safe_headers_"+id]).catch(()=>{});
 });
 chrome.tabs.onRemoved.addListener(id=>{
-  networkState.delete(id);
+  networkState.delete(id);redirects.delete(id);
   captures.delete(id);safeHeaders.delete(id);
   chrome.storage.session.remove(["nickname_tab_"+id,"instrument_tab_"+id,"safe_headers_"+id]).catch(()=>{});
 });
@@ -157,6 +163,14 @@ chrome.runtime.onMessage.addListener((message,sender,reply)=>{
     if(message?.kind==="diagnostics"){
       if(sender.tab)throw Error("Диагностика открывается через значок расширения");
       return diagnostics();
+    }
+    if(message?.kind==="resolve_redirect"){
+      if(!bankTab(sender))throw Error("Недопустимая вкладка");
+      const from=captureUrl(message.url);
+      if(!from||from.origin!==new URL(sender.tab.url).origin)throw Error("Недопустимый API");
+      const saved=redirects.get(sender.tab.id)?.get(from.href);
+      // Short lifetime, exact source URL, scoped to the requesting bank tab.
+      return {url:saved&&Date.now()-saved.at<15000?saved.url:null};
     }
     if(message?.kind==="config"){
       if(sender.tab&&!bankTab(sender))throw Error("Недопустимая страница");

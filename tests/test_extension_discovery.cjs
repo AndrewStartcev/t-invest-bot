@@ -16,19 +16,30 @@ async function browser(options={}){
     sendMessage(msg,cb){
       if(msg.kind==='config')return cb(mode==='pairing'?{ok:false,error:'Ключ недействителен',scope:'dashboard',status:401}:
         {ok:true,data:{profile_url:`https://www.tbank.ru/invest/social/profile/${author}/`,counts:{}}});
+      if(msg.kind==='resolve_redirect'){
+        let next=null;
+        if(mode==='redirect-prefix')next=msg.url.replace('/mybank/api/invest/','/api/invest/');
+        if(mode==='redirect-safe')next=msg.url.endsWith('/')?msg.url:msg.url+'/';
+        if(mode==='redirect-foreign')next='https://evil.test'+new URL(msg.url).pathname;
+        if(mode==='redirect-login')next=location.origin+'/login/';
+        if(mode==='redirect-author')next=location.origin+'/mybank/api/invest/social/v1/profile/nickname/Bob';
+        return cb({ok:true,data:{url:next}});
+      }
       if(msg.kind==='get_instrument_url')return cb({ok:true,data:observed});
       if(msg.kind==='report'){reports.push(msg.report);return cb({ok:true,data:{ok:true}});}
       throw Error(msg.kind);
     }}};
-  const ctx={chrome,location,URL,Date,AbortController,console,
+  const ctx={chrome,location,URL,Date,AbortController,console,queueMicrotask,
     performance:{getEntriesByType(){return (options.resources||[]).map(name=>({name}));}},clearTimeout(){},
-    setTimeout(fn,ms){if(ms===5000||ms===15000)timers.push(fn);return 1;},
+    setTimeout(fn,ms){if(ms===50){queueMicrotask(fn);return 1;}if(ms===5000||ms===15000)timers.push(fn);return 1;},
     async fetch(value,opts){
       const u=new URL(value);calls.push(u);
       assert.equal(u.origin,location.origin);assert.equal(opts.redirect,'manual');
       if(mode==='capture-race' && u.pathname.endsWith('/instrument')) {
         listener({kind:'instrument_url',url:location.origin+'/mybank/api/invest/social/v1/profile/uuid-Bob/instrument'},{});
       }
+      if(mode==='redirect-prefix' && u.pathname.startsWith('/mybank/'))return {type:'opaqueredirect',ok:false,status:0};
+      if(mode?.startsWith('redirect-') && mode!=='redirect-prefix' && !u.pathname.endsWith('/'))return {type:'opaqueredirect',ok:false,status:0};
       if(mode==='redirect')return {type:'opaqueredirect',ok:false,status:0};
       if(mode==='network')throw TypeError('Failed to fetch');
       if(mode==='navigate'){location.pathname='/invest/pulse/profile/Bob/operations/';mode='normal';}
@@ -62,6 +73,14 @@ async function browser(options={}){
   const redirect=await browser({mode:'redirect'});
   assert.equal(redirect.diag().code,'pulse_redirect');assert.equal(redirect.calls.length,1);
   assert(!redirect.diag().request.includes('?'));assert(redirect.diag().request.endsWith('/nickname/Alice'),'preserve nickname case');
+  const moved=await browser({mode:'redirect-prefix'});assert.equal(moved.diag().code,'ok');
+  assert(moved.calls.some(u=>u.pathname==='/api/invest/social/v1/profile/uuid-Alice/instrument'));
+  const safeRedirect=await browser({mode:'redirect-safe'});assert.equal(safeRedirect.diag().code,'ok');
+  assert(safeRedirect.calls.some(u=>u.pathname.endsWith('/nickname/Alice/')));
+  for(const mode of ['redirect-foreign','redirect-login','redirect-author']) {
+    const blocked=await browser({mode});assert.equal(blocked.diag().code,'pulse_redirect_blocked');
+    assert.equal(blocked.calls.length,1,'never fetch unsafe redirect');
+  }
   const pair=await browser({mode:'pairing'});assert.equal(pair.diag().code,'dashboard_401');
   assert.equal(pair.calls.length,0);assert.equal(pair.reports.length,0,'pairing failure cannot log out bank');
   for(const mode of ['401','403','404','429','network','html']){

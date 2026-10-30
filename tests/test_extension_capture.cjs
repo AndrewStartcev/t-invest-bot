@@ -9,7 +9,7 @@ for(const host of hosts){
 }
 assert(!manifest.host_permissions.some(s=>s.includes('*.')),'no unverified API subdomains');
 const saved={},sent=[],events={},tabs=[{id:7,url:'https://www.tbank.ru/invest/pulse/profile/Alice/operations/'}];
-function event(name){return {addListener(fn,filter){events[name]=fn;if(filter)assert.deepEqual(Array.from(filter.urls).sort(),hosts.map(h=>`https://${h}/mybank/api/*`).sort());}};}
+function event(name){return {addListener(fn,filter){events[name]=fn;if(filter)assert.deepEqual(Array.from(filter.urls).sort(),hosts.map(h=>`https://${h}/*`).sort());}};}
 function worker(){
   const chrome={webRequest:{onBeforeSendHeaders:event('headers'),onCompleted:event('complete'),onErrorOccurred:event('error'),onBeforeRedirect:event('redirect')},
     permissions:{async contains(){return true;}},
@@ -40,6 +40,9 @@ async function msg(message,sender={tab:tabs[0]}){
   await events.error({tabId:7,requestId:'redirect-1',url:base,error:'net::ERR_ABORTED'});
   const redirected=await msg({kind:'diagnostics'},{});
   assert.equal(redirected.data.tabs[0].network.redirectHost,'unknown.test');
+  assert.equal((await msg({kind:'resolve_redirect',url:base})).data.url,'https://unknown.test/private/login?sessionId=private#secret');
+  assert(!(await msg({kind:'resolve_redirect',url:base},{tab:{id:8,url:'https://evil.test/'}})).ok);
+  assert.equal((await msg({kind:'resolve_redirect',url:base},{tab:{id:8,url:tabs[0].url}})).data.url,null);
   assert(!JSON.stringify(redirected).includes('sessionId'));
   assert(!JSON.stringify(redirected).includes('/private/login'));
   await events.error({tabId:7,requestId:'other',url:base,error:'net::ERR_CERT_AUTHORITY_INVALID'});
