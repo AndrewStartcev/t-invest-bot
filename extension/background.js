@@ -5,7 +5,7 @@ const BACKENDS=new Set(["https://invest.argokov.ru","http://127.0.0.1:8765","htt
 const BANKS=new Set(["www.tbank.ru","tbank.ru","www.tbank-online.com","tbank-online.com"]);
 const captures=new Map();
 const safeHeaders=new Map();
-const selectedTabs=new Set();
+
 
 function bankTab(sender){
   try{
@@ -15,20 +15,23 @@ function bankTab(sender){
   }catch{return false;}
 }
 async function send(report){
-  const cfg=await chrome.storage.local.get(["endpoint","client","key","enabled"]);
+  const cfg=await chrome.storage.local.get(["endpoint","key","enabled"]);
   const origin=String(cfg.endpoint||"").replace(/\/$/,"");
   if(!BACKENDS.has(origin))throw Error("Допустим только адрес админки T-Invest Bot");
-  if(!/^[a-z][a-z0-9_-]{2,31}$/.test(cfg.client||""))throw Error("Неверный логин кабинета");
   if(typeof cfg.key!=="string"||cfg.key.length<32)throw Error("Укажи ключ подключения");
   if(!cfg.enabled&&report.kind!=="config"&&report.status!=="stopped")throw Error("Расширение выключено");
   const response=await fetch(origin+"/api/extension/report",{
     method:"POST",cache:"no-store",signal:AbortSignal.timeout(20000),
-    headers:{"Content-Type":"application/json","X-TInvest-Extension-Client":cfg.client,
+    headers:{"Content-Type":"application/json",
              "X-TInvest-Extension-Key":cfg.key},
     body:JSON.stringify(report)
   });
   const data=await response.json().catch(()=>({}));
-  if(!response.ok||!data.ok)throw Error(data.error||"HTTP "+response.status);
+  if(!response.ok||!data.ok){
+    const error=Error(data.error||"Ошибка подключения кабинета · HTTP "+response.status);
+    error.scope="dashboard";error.status=response.status;
+    throw error;
+  }
   if(report.kind==="trades") {
     const update={
       last_status:report.status,
@@ -94,17 +97,8 @@ chrome.webRequest.onCompleted.addListener(async details=>{
 },{urls:["https://*.tbank.ru/mybank/api/*","https://*.tbank-online.com/mybank/api/*"]});
 
 chrome.tabs.onRemoved.addListener(id=>{
-  captures.delete(id);safeHeaders.delete(id);selectedTabs.delete(id);
+  captures.delete(id);safeHeaders.delete(id);
   chrome.storage.session.remove(["nickname_tab_"+id,"instrument_tab_"+id,"safe_headers_"+id]).catch(()=>{});
-});
-chrome.tabs.onUpdated.addListener((id,change)=>{
-  if(!selectedTabs.has(id)||!change.url)return;
-  try{
-    const u=new URL(change.url);
-    if(/^id\.(?:tbank\.ru|tbank-online\.com)$/.test(u.hostname)||
-      BANKS.has(u.hostname)&&/^\/auth(?:\/|$)/.test(u.pathname))
-      send({kind:"auth_status",status:"login_required"}).catch(()=>{});
-  }catch{}
 });
 
 chrome.runtime.onMessage.addListener((message,sender,reply)=>{
@@ -138,8 +132,7 @@ chrome.runtime.onMessage.addListener((message,sender,reply)=>{
     if(message?.kind==="open_portfolio"){
       if(sender.tab)throw Error("Открывается только из расширения");
       const profile=checkedProfile((await send({kind:"config"})).profile_url);
-      const tab=await chrome.tabs.create({url:profile.href,active:true});
-      selectedTabs.add(tab.id);
+      await chrome.tabs.create({url:profile.href,active:true});
       return {opened:true};
     }
     if(message?.kind==="report"){
@@ -148,11 +141,11 @@ chrome.runtime.onMessage.addListener((message,sender,reply)=>{
         throw Error("Неизвестный формат отчёта");
       return send(message.report);
     }
-    if(message?.kind==="open_login"){
+    if(message?.kind==="open_profile"||message?.kind==="open_login"){
       if(sender.tab)throw Error("Открой через значок расширения");
       const profile=checkedProfile((await send({kind:"config"})).profile_url);
-      const tab=await chrome.tabs.create({url:pageUrl(profile),active:true});
-      selectedTabs.add(tab.id);
+      // Open the watched public author page, not a banking login.
+      await chrome.tabs.create({url:pageUrl(profile),active:true});
       return {opened:true};
     }
     if(message?.kind==="stop"){
