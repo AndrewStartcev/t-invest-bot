@@ -329,7 +329,7 @@
                 <div class="source-line"><span>Последняя проверка</span><b id="last-check">—</b></div>
                 <div class="source-line"><span>Контроль входа (Яндекс Браузер / Brave)</span><b id="extension-status">Не подключено</b></div>
                 <div class="source-line"><span>Последняя проверка входа</span><b id="extension-last">—</b></div>
-                <a class="button neutral small space-top" id="extension-login" target="_blank" rel="noopener noreferrer">Войти в Пульс</a>
+                <a class="button neutral small space-top" id="extension-login" target="_blank" rel="noopener noreferrer">Открыть сделки автора</a>
                 <div class="form-actions space-top" style="flex-wrap:wrap">
                   <a class="button small" id="extension-download" href="/api/extension/download.zip" download="t-invest-pulse-extension.zip">Скачать расширение (.zip)</a>
                   <button class="button neutral small" id="extension-install" type="button" aria-expanded="false" aria-controls="extension-guide">Как установить</button>
@@ -340,8 +340,8 @@
                   <p>1. Скачай ZIP и распакуй архив в постоянную папку <code>t-invest-pulse-extension</code>.</p>
                   <p>2. Открой в Яндекс Браузере <code>browser://extensions</code>.</p>
                   <p>3. Включи «Режим разработчика» и нажми «Загрузить распакованное расширение». Выбери папку, где лежит <code>manifest.json</code>.</p>
-                  <p>4. Скопируй ключ из своего кабинета. В расширении укажи URL панели, свой логин и ключ. Автор выбирается только в админке.</p>
-                  <p>5. Нажми «Проверить связь» → «Войти и начать». Авторизуйся в Пульсе и оставь вкладку «Сделки» открытой.</p>
+                  <p>4. Скопируй ключ из своего кабинета. В расширении укажи URL панели и ключ своего кабинета. Имя клиента определяется автоматически по ключу. Автор выбирается только в админке.</p>
+                  <p>5. Нажми «Проверить связь», включи передачу данных и сохрани настройки. Затем нажми «Открыть сделки автора». Расширение не входит в чужой банковский аккаунт и не сбрасывает твой.</p>
                   <p>6. История за 24 часа и 30 дней загрузится постепенно. Прогресс виден в разделе «Сделки».</p>
                   <p>7. Для загрузки портфеля нажми в расширении «Портфель автора», затем на сайте банка открой «Портфель» → «Компании». Видимые позиции и доли появятся в одноимённой вкладке админки.</p>
                   <p class="muted">Для Brave установка аналогична через <code>brave://extensions/</code>. При обновлении расширения замени файлы и нажми «Обновить» в списке расширений.</p>
@@ -719,7 +719,7 @@
           return {label:'Расширение выключено',detail:'Включи мониторинг в Brave, если хочешь получать сделки.',warning:true};
         if(auth.last_status==='login_required')
           return {label:'Требуется вход в Пульс',
-                  detail:'Открой расширение Brave и нажми «Войти в Пульс».',error:true};
+                  detail:'Для API Пульса может понадобиться собственная банковская сессия клиента. Расширение не выполняет вход.',error:true};
         if(deals.last_status==='unavailable'||deals.last_status==='rate_limited')
           return {label:'Пульс: ждём данные из Brave',
                   detail:deals.last_error||'Открой страницу «Сделки» в Brave и нажми F5.',warning:true};
@@ -775,7 +775,7 @@
       if(!items.length){box.textContent='Нет событий авторизации';return;}
       const info=document.createElement('p');
       info.className='subtle';
-      info.textContent='Контроль авторизации Brave · только вход в банк';
+      info.textContent='Контроль доступности API Пульса через браузер клиента';
       box.append(info);
       const archived=document.createElement('details');
       archived.className='space-top';
