@@ -104,6 +104,31 @@ class Manager:
             self.workers[user].start()
             return self.workers[user]
 
+    def extension_client(self, provided_key):
+        """Resolve the owning tenant from its pairing key, never from a user hint.
+
+        A browser extension is not authenticated as the dashboard's admin or
+        as the author followed on Pulse. Only a registered tenant's pairing
+        credential identifies where the report belongs.
+        """
+        if (not isinstance(provided_key, str) or
+                not 32 <= len(provided_key) <= 256 or
+                not provided_key.isascii()):
+            return None
+        matched = None
+        for user in self.accounts.users():
+            key_file = self.accounts.directory(user) / "extension-pairing-key.txt"
+            try:
+                known = key_file.read_text(encoding="ascii").strip()
+            except FileNotFoundError:
+                continue
+            if len(known) >= 32 and hmac.compare_digest(provided_key, known):
+                if matched is not None:
+                    # Accidentally duplicated credentials are never ambiguous.
+                    raise RuntimeError("Повторяющийся ключ расширения у разных клиентов")
+                matched = user
+        return matched
+
     def supervise(self):
         while True:
             with self.lock:
@@ -169,8 +194,14 @@ class Gateway(BaseHTTPRequestHandler):
             self.reply(403, {"error": "Доступ отклонён"})
             return
         manager = self.server.manager
-        user = self.headers.get("X-TInvest-Extension-Client", "") if extension else self.headers.get("X-TInvest-User", "")
         try:
+            if extension:
+                user = manager.extension_client(self.headers.get("X-TInvest-Extension-Key", ""))
+                if user is None:
+                    self.reply(401, {"error": "Ключ расширения не привязан ни к одному клиентскому кабинету"})
+                    return
+            else:
+                user = self.headers.get("X-TInvest-User", "")
             if not owner:
                 manager.accounts.directory(user)
                 if self.path != "/" and not self.path.startswith("/api/"):
