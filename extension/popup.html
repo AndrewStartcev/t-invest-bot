@@ -2,16 +2,16 @@
 <html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Пульс · Источник данных</title><link rel="stylesheet" href="popup.css"></head>
 <body>
-<header><span class="eyebrow">T-Invest · Пульс</span><h1>Мониторинг сделок</h1><p>Данные Пульса передаются из авторизованного Яндекс Браузера (или Brave) в админку. Банковский вход на сервере не нужен.</p></header>
+<header><span class="eyebrow">T-Invest · Пульс</span><h1>Мониторинг сделок</h1><p>Следи за публичными сделками выбранного автора через свой браузер. Аккаунт автора и твой банковский аккаунт — разные.</p></header>
 <form id="config">
 <label>Адрес админки<input id="endpoint" type="url" required placeholder="https://invest.argokov.ru"></label>
-<label>Логин кабинета<input id="client" type="text" required pattern="[a-z][a-z0-9_-]{2,31}" placeholder="admin"></label>
-<label>Ключ расширения<input id="key" type="password" minlength="32" required autocomplete="off" placeholder="Скопируй из админки"></label>
+<label>Ключ подключения<input id="key" type="password" minlength="32" required autocomplete="off" placeholder="Возьми из своего кабинета"></label>
+<div class="selected-profile"><small>Кабинет клиента (определяется по ключу)</small><b id="account-name">Не подключён</b></div>
 <div class="selected-profile"><small>Автор выбран в админке</small><b id="selected-author">Подключи кабинет</b></div>
 <div class="row"><label>Интервал опроса<select id="interval"><option value="5">5 секунд</option><option value="3">3 секунды</option></select></label><label class="switch">Передавать сделки<input id="enabled" type="checkbox"></label></div>
 <button type="submit" class="primary">Сохранить</button>
 </form>
-<div class="actions"><button id="test" type="button">Проверить связь</button><button id="open" type="button">Войти и начать</button><button id="open-portfolio" type="button">Портфель автора</button></div>
+<div class="actions"><button id="test" type="button">Проверить связь</button><button id="open" type="button">Открыть сделки автора</button><button id="open-portfolio" type="button">Портфель автора</button></div>
 <div id="status" role="status" aria-live="polite">Расширение готово к настройке.</div><p id="scan-info" class="scan-info" aria-live="polite">Данные по инструментам ещё не получены.</p>
-<p class="footnote">Для портфеля открой «Портфель автора» → вкладка «Компании» в Пульсе. Список долей передастся в админку автоматически при обнаружении подтверждённого профиля.</p><p class="footnote">Расширение читает опубликованные сделки и проверяет вход в Пульс в браузере. Держи вкладку «Сделки» открытой; браузер может замедлять фоновые проверки. Вход и cookie остаются в твоём браузере.</p>
+<p class="footnote">Для портфеля открой «Портфель автора» → вкладка «Компании» в Пульсе. Список долей передастся в админку автоматически при обнаружении подтверждённого профиля.</p><p class="footnote">Расширение не входит в Т-Банк за клиента, не переключает банковский профиль и не требует входа под аккаунтом автора. Если сам Т-Банк ограничивает доступ к данным, можно использовать только свою банковскую сессию. Для мониторинга держи вкладку «Сделки» открытой.</p>
 <script src="popup.js"></script></body></html>
