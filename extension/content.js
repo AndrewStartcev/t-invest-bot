@@ -8,7 +8,7 @@
   const VALID_HOSTS = new Set(["www.tbank.ru", "tbank.ru", "www.tbank-online.com", "tbank-online.com"]);
   const MAX_ITEMS = 6000;
   const MAX_DELTA = 500;
-  let instrumentUrl = null, nicknameUrl = null, busy = false, lastProfileCheck = 0, lastIdentityCheck = 0, previousStart = 0;
+  let instrumentUrl = null, nicknameUrl = null, busy = false, lastIdentityCheck = 0, previousStart = 0;
   let consecutiveFailures = 0;
   let safeHeaders = {};
   let lastAuthFailure=0;
@@ -38,7 +38,8 @@
   }
 
   function errorStatus(error) {
-    if (error.status === 401 || /авторизац|вход|login/i.test(error.message)) return "login_required";
+    // A wrong client pairing key is NOT a lost T-Bank session.
+    if (error.status === 401 && error.scope === "pulse") return "login_required";
     if (error.status === 403 || error.status === 404) return "restricted";
     if (error.status === 429) return "rate_limited";
     return "unavailable";
@@ -58,6 +59,7 @@
       if (!response.ok) {
         const error = Error("API Пульса: HTTP " + response.status);
         error.status = response.status;
+        error.scope = "pulse";
         throw error;
       }
       if (new URL(response.url).hostname.startsWith("id.")) throw Error("Требуется вход в банк");
@@ -338,6 +340,7 @@
       if (!response.ok) {
         const error = Error("Автор Пульса: HTTP " + response.status);
         error.status = response.status;
+        error.scope = "pulse";
         throw error;
       }
       const data = await response.json();
@@ -345,23 +348,6 @@
         throw Error("UUID инструментов не принадлежит автору на странице; обнови её F5");
       lastIdentityCheck = Date.now();
     } finally { clearTimeout(timer); }
-  }
-
-  async function profileCheck() {
-    if (Date.now()-lastProfileCheck < 90000) return;
-    lastProfileCheck = Date.now();
-    // Verify the page/auth session independently of fast instrument polling.
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 9000);
-    try {
-      const response = await fetch(location.href, {credentials:"include", cache:"no-store", signal:controller.signal});
-      if (!response.ok) {
-        const error = Error("Профиль: HTTP " + response.status);
-        error.status = response.status;
-        throw error;
-      }
-      if (new URL(response.url).hostname.startsWith("id.")) throw Error("Требуется вход в банк");
-    } finally {clearTimeout(timer);}
   }
 
   async function setStage(stage, extra={}) {
@@ -399,12 +385,11 @@
       if(!instrumentUrl||!nicknameUrl){
         await setStage("Ожидаем API списка инструментов от Пульса");
         if(Date.now()-mountedAt>20000)
-          throw Error("Пульс не отправил API запросы. Открой Сделки автора и нажми F5.");
+          throw Error("Нет данных API профиля. Открой сделки автора и обнови страницу F5; не входи под аккаунтом автора.");
         return interval;
       }
-      await setStage("Подтверждаем автора и вход в банк");
+      await setStage("Проверяем, что API относится к выбранному автору");
       await verifyAuthor();
-      await profileCheck();
       await setStage("Загружаем инструменты из Пульса");
       const list=await instruments();
       const saved=config.counts||{};
