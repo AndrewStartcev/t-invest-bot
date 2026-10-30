@@ -70,7 +70,7 @@ async function showDiagnostics(){
         "API автора / инструментов / подтверждение: "+[s.nickname,s.instrument,s.verified].map(v=>v?"да":"нет").join(" / "),
         "Действие: "+s.step,"Проверка: "+(s.at?new Date(s.at).toLocaleTimeString("ru-RU"):"запускается"));
       if(s?.observedApi?.length) lines.push("API, загруженные вкладкой: "+s.observedApi.join("; "));
-      if(tab.network?.redirectHost) lines.push("Редирект API: HTTP "+tab.network.status+" → хост "+tab.network.redirectHost+" (не выполнялся расширением)");
+      if(tab.network?.redirectHost) lines.push("Редирект API: HTTP "+tab.network.status+" → хост "+tab.network.redirectHost);
       if(tab.network?.requestPath) lines.push("Сетевое событие: "+tab.network.requestPath+" · "+new Date(tab.network.at).toLocaleTimeString("ru-RU"));
       if(tab.network?.error) lines.push("Браузер: "+tab.network.error+
         (tab.network.error.includes("CERT")?" — проверь сертификат по инструкции банка; не отключай проверку TLS":""));
