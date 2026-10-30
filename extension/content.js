@@ -11,8 +11,21 @@
   let instrumentUrl = null, nicknameUrl = null, busy = false, lastIdentityCheck = 0, previousStart = 0;
   let consecutiveFailures = 0;
   let safeHeaders = {};
+  const failedUrls = new Set();
   let lastAuthFailure=0;
-  const mountedAt = Date.now();
+  let contextKey = "", generation = 0;
+  let diagnostic = {code:"starting", stage:"Запуск", step:"Подожди несколько секунд"};
+  function failure(code, message, step) {
+    return Object.assign(Error(message), {code, step});
+  }
+  function checkedApi(value, pattern) {
+    const u = new URL(value);
+    if(u.origin !== location.origin || u.protocol !== "https:" ||
+       !VALID_HOSTS.has(u.hostname) || u.username || u.password ||
+       !u.pathname.startsWith("/mybank/api/invest/") || !pattern.test(u.pathname))
+      throw failure("api_address", "Неподтверждённый адрес API", "Открой сделки выбранного автора через расширение");
+    return u;
+  }
 
   function selectedNickname(urlString) {
     try {
@@ -27,11 +40,18 @@
   }
 
   function wait(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
-  function request(message) {
+  async function request(message) {
+    if(message.kind === "report" && contextKey) {
+      const pairing = await chrome.storage.local.get(["enabled","endpoint","key"]);
+      const expected=JSON.parse(contextKey);
+      if(!pairing.enabled || location.href!==expected[0] || (pairing.endpoint??null)!==expected[2] || (pairing.key??null)!==expected[3])
+        throw failure("context_changed", "Вкладка или подключение изменились", "Дождись следующей проверки");
+    }
     return new Promise((resolve, reject) => {
       chrome.runtime.sendMessage(message, response => {
         if (chrome.runtime.lastError) return reject(Error(chrome.runtime.lastError.message));
-        if (!response?.ok) return reject(Error(response?.error || "Нет ответа расширения"));
+        if (!response?.ok) return reject(Object.assign(Error(response?.error || "Нет ответа расширения"),
+          {scope:response?.scope, status:response?.status, code:response?.code}));
         resolve(response.data);
       });
     });
@@ -53,7 +73,7 @@
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
       const response = await fetch(target.href, {
-        credentials: "include", cache: "no-store", signal: controller.signal,
+        credentials: "include", cache: "no-store", redirect:"error", signal: controller.signal,
         headers: safeHeaders
       });
       if (!response.ok) {
@@ -63,9 +83,9 @@
         throw error;
       }
       if (new URL(response.url).hostname.startsWith("id.")) throw Error("Требуется вход в банк");
-      const json = await response.json();
+      const json = await response.json().catch(() => {throw failure("api_format", "API Пульса вернул не JSON", "Проверь доступность Сделок в самой вкладке банка");});
       const payload = json?.payload;
-      if (!payload || !Array.isArray(payload.items)) throw Error("Формат API Пульса изменился");
+      if (!payload || !Array.isArray(payload.items)) throw failure("api_format", "Формат API Пульса изменился", "Передай код диагностики разработчику");
       return payload;
     } finally { clearTimeout(timer); }
   }
@@ -323,34 +343,58 @@
 
   async function verifyAuthor() {
     if (Date.now()-lastIdentityCheck < 90000) return;
-    if (!nicknameUrl || !instrumentUrl) throw Error("Не обнаружен запрос подтверждения автора; обнови Сделки F5");
-    const nickname = new URL(nicknameUrl);
-    if (nickname.origin !== location.origin ||
-        decodeURIComponent(nickname.pathname.split("/").pop()).toLowerCase() !== selectedNickname(location.href)) {
-      throw Error("Нельзя подтвердить соответствие страницы выбранному автору");
+    // Bootstrap from the existing same-origin API contract. No session storage,
+    // cookie inspection or guessing of third-party API hosts is needed.
+    let nickname = nicknameUrl
+      ? checkedApi(nicknameUrl, /\/profile\/nickname\/[^/]+\/?$/)
+      : new URL("/mybank/api/invest/social/v1/profile/nickname/" +
+          encodeURIComponent(selectedNickname(location.href)), location.origin);
+    if(!nicknameUrl && instrumentUrl) {
+      // A missed nickname request can reuse the observed API query locally.
+      nickname.search = checkedApi(instrumentUrl, INSTRUMENT_PATH).search;
+      nickname.searchParams.delete("nextCursor");
     }
-    const uuid = new URL(instrumentUrl).pathname.match(/\/profile\/([^/]+)\/instrument/);
-    if (!uuid) throw Error("Неподтверждённый адрес списка инструментов");
+    if(decodeURIComponent(nickname.pathname.replace(/\/$/, "").split("/").pop()).toLowerCase()
+        !== selectedNickname(location.href)) {
+      nicknameUrl = null; instrumentUrl = null;
+      nickname = new URL("/mybank/api/invest/social/v1/profile/nickname/" +
+        encodeURIComponent(selectedNickname(location.href)), location.origin);
+    }
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(),9000);
+    const page = location.href, epoch = generation;
     try {
       const response = await fetch(nickname.href, {
-        credentials:"include",cache:"no-store",signal:controller.signal,headers:safeHeaders
+        credentials:"include",cache:"no-store",redirect:"error",signal:controller.signal,headers:safeHeaders
       });
       if (!response.ok) {
-        const error = Error("Автор Пульса: HTTP " + response.status);
-        error.status = response.status;
-        error.scope = "pulse";
-        throw error;
+        throw Object.assign(Error("Автор Пульса: HTTP " + response.status),
+          {status:response.status, scope:"pulse"});
       }
-      const data = await response.json();
-      if (typeof data?.payload?.id !== "string" || data.payload.id !== uuid[1])
-        throw Error("UUID инструментов не принадлежит автору на странице; обнови её F5");
+      const data = await response.json().catch(() => {throw failure("api_format", "Ответ автора не JSON", "Проверь, открывается ли профиль в банке");});
+      const id = data?.payload?.id;
+      if(typeof id !== "string" || !/^[a-zA-Z0-9-]{1,128}$/.test(id))
+        throw failure("author_format", "API не подтвердил идентификатор автора", "Проверь доступность профиля; передай код разработчику");
+      if(page !== location.href || epoch !== generation)
+        throw failure("page_changed", "Страница изменилась во время проверки", "Дождись следующего цикла");
+      if(instrumentUrl) {
+        const captured = checkedApi(instrumentUrl, INSTRUMENT_PATH);
+        const capturedId = captured.pathname.match(/\/profile\/([^/]+)\/instrument/)[1];
+        if(capturedId !== id) instrumentUrl = null;
+      }
+      if(!instrumentUrl) {
+        const target = new URL(nickname.href);
+        target.pathname = target.pathname.replace(/\/nickname\/[^/]+\/?$/, "/"+encodeURIComponent(id)+"/instrument");
+        target.searchParams.delete("nextCursor");
+        instrumentUrl = target.href;
+      }
+      nicknameUrl = nickname.href;
       lastIdentityCheck = Date.now();
     } finally { clearTimeout(timer); }
   }
 
   async function setStage(stage, extra={}) {
+    diagnostic = {...diagnostic, stage, at:new Date().toISOString()};
     await chrome.storage.local.set({scan_stage:stage,scan_stage_at:new Date().toISOString(),...extra});
   }
 
@@ -359,37 +403,47 @@
     busy = true;
     const cfg = await chrome.storage.local.get(["enabled", "interval"]);
     const interval = cfg.interval === 3 ? 3000 : 5000;
-    let profileUrl = null;
+    let profileUrl = null, pollPage = location.href, pollContext = "";
+    function stillCurrent() {
+      if(location.href !== pollPage || contextKey !== pollContext)
+        throw failure("page_changed", "Страница или подключение изменились", "Дождись следующей проверки");
+    }
     try {
       if (!cfg.enabled) {
+        diagnostic.code="disabled"; diagnostic.step="Включи передачу сделок и сохрани настройки";
         await setStage("Мониторинг выключен");
         return interval;
       }
       if (!operationsTab()) {
+        diagnostic.code="wrong_page"; diagnostic.step="Нажми «Открыть сделки автора»";
         await setStage("Ожидаем вкладку «Сделки» выбранного автора");
         return interval;
       }
       await setStage("Проверяем выбранного автора в админке");
       const config=await request({kind:"config"});
       profileUrl=config.profile_url;
+      const pairing = await chrome.storage.local.get(["endpoint","key"]);
+      pollContext = JSON.stringify([location.href,profileUrl,pairing.endpoint,pairing.key]);
+      if(contextKey !== pollContext) {
+        contextKey=pollContext; generation++; lastIdentityCheck=0;
+        instrumentUrl=null; nicknameUrl=null; safeHeaders={};
+        historyRetryAt.clear(); monthRetryAt.clear(); monthCurrentKey=null;
+      }
+      stillCurrent();
       if(selectedNickname(profileUrl)!==selectedNickname(location.href)) {
+        diagnostic.code="wrong_author"; diagnostic.step="Открой автора, выбранного в твоём кабинете, кнопкой расширения";
         await setStage("Открыта вкладка другого автора");
         return interval;
       }
       if(!instrumentUrl||!nicknameUrl){
         const observed=await request({kind:"get_instrument_url"});
-        instrumentUrl=observed.instrument_url;
-        nicknameUrl=observed.nickname_url;
+        instrumentUrl=failedUrls.has(observed.instrument_url)?null:observed.instrument_url;
+        nicknameUrl=failedUrls.has(observed.nickname_url)?null:observed.nickname_url;
         safeHeaders=observed.headers||{};
-      }
-      if(!instrumentUrl||!nicknameUrl){
-        await setStage("Ожидаем API списка инструментов от Пульса");
-        if(Date.now()-mountedAt>20000)
-          throw Error("Нет данных API профиля. Открой сделки автора и обнови страницу F5; не входи под аккаунтом автора.");
-        return interval;
       }
       await setStage("Проверяем, что API относится к выбранному автору");
       await verifyAuthor();
+      stillCurrent();
       await setStage("Загружаем инструменты из Пульса");
       const list=await instruments();
       const saved=config.counts||{};
@@ -407,6 +461,14 @@
           changed.push(...(await history(item.ticker,item.classCode,delta)).reverse());
         }
       }
+      stillCurrent();
+      const latest = await chrome.storage.local.get(["enabled","endpoint","key"]);
+      if(!latest.enabled || JSON.stringify([location.href,profileUrl,latest.endpoint,latest.key]) !== pollContext)
+        throw failure("pairing_changed", "Подключение изменилось во время запроса", "Дождись следующего цикла");
+      // Recheck server-selected author before acknowledging a snapshot.
+      if((await request({kind:"config"})).profile_url !== profileUrl)
+        throw failure("author_changed", "В кабинете выбран другой автор", "Открой его сделки через расширение");
+      stillCurrent();
       await setStage("Отправляем "+list.length+" инструментов в админку");
       const ack=await request({kind:"report",report:{
         kind:"trades",status:"ok",profile_url:profileUrl,
@@ -415,14 +477,33 @@
       if(!ack?.ok)throw Error("Сервер не подтвердил сохранение");
       await setStage("Данные получены · "+list.length+" инструментов",
                      {last_success_at:new Date().toISOString(),last_instrument_count:list.length,last_error:""});
+      diagnostic.code="ok"; diagnostic.message=""; diagnostic.http=null; diagnostic.step="Держи вкладку сделок открытой";
       consecutiveFailures=0;
       await backfillHistory(profileUrl,list,config);
       await backfillMonth(profileUrl,list,config);
       return interval;
     }catch(error){
       consecutiveFailures++;
+      const dashboard = error.scope === "dashboard";
+      diagnostic.code = error.code || (dashboard ? "dashboard_" : "pulse_") +
+        (error.status || (error.name === "AbortError" ? "timeout" : "network"));
+      diagnostic.message = String(error.message||error).slice(0,200);
+      diagnostic.http = error.status || null;
+      diagnostic.step = error.step || (dashboard
+        ? (error.status===401 || error.status===403 ? "Скопируй ключ из своего кабинета клиента и сохрани его" : "Проверь доступность админки и адрес подключения")
+        : error.status===401 ? "Войди в свой аккаунт банка в этой вкладке; аккаунт автора не нужен"
+        : error.status===403 || error.status===404 ? "Проверь, видны ли сделки автора в банке: доступ ограничен или API изменился"
+        : error.status===429 ? "Банк ограничил частоту: подожди, повтор выполняется автоматически"
+        : "Проверь открытие сделок в банке, сеть и сертификат. Сетевой сбой сам по себе не доказывает проблему сертификата");
+      // An expired captured URL must not trap polling forever.
+      if(!dashboard && [400,401,403,404].includes(error.status)) {
+        if(instrumentUrl)failedUrls.add(instrumentUrl);
+        if(nicknameUrl)failedUrls.add(nicknameUrl);
+        if(failedUrls.size>32)failedUrls.delete(failedUrls.values().next().value);
+        instrumentUrl=null; nicknameUrl=null; lastIdentityCheck=0;
+      }
       await setStage("Ошибка загрузки данных",{last_error:String(error.message||error).slice(0,200)});
-      if(profileUrl&&selectedNickname(profileUrl)===selectedNickname(location.href)){
+      if(!dashboard && location.href===pollPage && profileUrl&&selectedNickname(profileUrl)===selectedNickname(location.href)){
         const status=errorStatus(error);
         try{
           await request({kind:"report",report:{kind:"trades",status:status==="login_required"?"login_required":"unavailable",
@@ -444,12 +525,21 @@
     setTimeout(run,delay || 5000);
   }
 
-  chrome.runtime.onMessage.addListener(message => {
+  chrome.runtime.onMessage.addListener((message, sender, reply) => {
+    if(message?.kind === "diagnose") {
+      reply({code:diagnostic.code, stage:diagnostic.stage, step:diagnostic.step,
+        at:diagnostic.at, message:diagnostic.message||"", http:diagnostic.http || null,
+        page:location.origin+location.pathname, author:selectedNickname(location.href),
+        operations:operationsTab(), instrument:!!instrumentUrl, nickname:!!nicknameUrl,
+        verified:!!lastIdentityCheck, busy});
+      return false;
+    }
     if (message?.kind === "safe_headers") {
       safeHeaders = Object.fromEntries(Object.entries(message.headers || {}).filter(
         ([key]) => ["x-app-name","x-app-version","x-platform"].includes(key.toLowerCase())));
     }
     if (message?.kind === "instrument_url") {
+      if(busy)return false; // Keep the verified API identity fixed during a scan.
       try {
         const parsed = new URL(message.url);
         if (parsed.origin === location.origin && INSTRUMENT_PATH.test(parsed.pathname)) {
@@ -459,6 +549,7 @@
       } catch { /* Not a Pulse URL. */ }
     }
     if (message?.kind === "nickname_url") {
+      if(busy)return false;
       try {
         const parsed = new URL(message.url);
         const match=/\/social\/v1\/profile\/nickname\/([^/]+)\/?$/.exec(parsed.pathname);

@@ -5,6 +5,30 @@ const BACKENDS=new Set(["https://invest.argokov.ru","http://127.0.0.1:8765","htt
 const BANKS=new Set(["www.tbank.ru","tbank.ru","www.tbank-online.com","tbank-online.com"]);
 const captures=new Map();
 const safeHeaders=new Map();
+const networkState=new Map();
+const API_FILTER={urls:[...BANKS].map(host=>"https://"+host+"/mybank/api/*")};
+function captureUrl(value) {
+  try {
+    const u=new URL(value);
+    return u.protocol==="https:" && BANKS.has(u.hostname) && !u.username && !u.password &&
+      u.pathname.startsWith("/mybank/api/invest/social/v1/profile/") ? u : null;
+  } catch {return null;}
+}
+async function diagnostics() {
+  const tabs=await chrome.tabs.query({});
+  const results=[];
+  for(const tab of tabs.filter(t=>bankTab({tab:t}))) {
+    const u=new URL(tab.url);
+    const allowed=await chrome.permissions.contains({origins:[u.origin+"/*"]});
+    let state;
+    if(allowed) {
+      try {state=await chrome.tabs.sendMessage(tab.id,{kind:"diagnose"});} catch {}
+    }
+    results.push({tabId:tab.id, active:!!tab.active, page:u.origin+u.pathname, allowed,
+      state:state||null, network:networkState.get(tab.id)||null});
+  }
+  return {version:chrome.runtime.getManifest().version,tabs:results};
+}
 
 
 function bankTab(sender){
@@ -17,15 +41,16 @@ function bankTab(sender){
 async function send(report){
   const cfg=await chrome.storage.local.get(["endpoint","key","enabled"]);
   const origin=String(cfg.endpoint||"").replace(/\/$/,"");
-  if(!BACKENDS.has(origin))throw Error("Допустим только адрес админки T-Invest Bot");
-  if(typeof cfg.key!=="string"||cfg.key.length<32)throw Error("Укажи ключ подключения");
+  if(!BACKENDS.has(origin))throw Object.assign(Error("Допустим только адрес админки T-Invest Bot"),{scope:"dashboard",code:"dashboard_address"});
+  if(typeof cfg.key!=="string"||cfg.key.length<32)throw Object.assign(Error("Укажи ключ подключения"),{scope:"dashboard",code:"dashboard_pairing"});
   if(!cfg.enabled&&report.kind!=="config"&&report.status!=="stopped")throw Error("Расширение выключено");
   const response=await fetch(origin+"/api/extension/report",{
     method:"POST",cache:"no-store",signal:AbortSignal.timeout(20000),
     headers:{"Content-Type":"application/json",
              "X-TInvest-Extension-Key":cfg.key},
     body:JSON.stringify(report)
-  });
+  }).catch(()=>{throw Object.assign(Error("Админка недоступна: сеть или тайм-аут"),
+    {scope:"dashboard",code:"dashboard_network"});});
   const data=await response.json().catch(()=>({}));
   if(!response.ok||!data.ok){
     const error=Error(data.error||"Ошибка подключения кабинета · HTTP "+response.status);
@@ -66,7 +91,9 @@ function pageUrl(profile){
 }
 chrome.webRequest.onBeforeSendHeaders.addListener(async details=>{
   if(details.tabId<0)return;
-  const pathname=new URL(details.url).pathname;
+  const target=captureUrl(details.url);
+  if(!target)return;
+  const pathname=target.pathname;
   if(!/\/social\/v1\/profile\/[^/]+\/instrument\/?$/.test(pathname))return;
   const headers={};
   for(const entry of details.requestHeaders||[])
@@ -75,13 +102,15 @@ chrome.webRequest.onBeforeSendHeaders.addListener(async details=>{
   safeHeaders.set(details.tabId,headers);
   await chrome.storage.session.set({["safe_headers_"+details.tabId]:headers});
   chrome.tabs.sendMessage(details.tabId,{kind:"safe_headers",headers}).catch(()=>{});
-},{urls:["https://*.tbank.ru/mybank/api/*","https://*.tbank-online.com/mybank/api/*"]},
+},API_FILTER,
 ["requestHeaders","extraHeaders"]);
 
 chrome.webRequest.onCompleted.addListener(async details=>{
   if(details.tabId<0)return;
-  const u=new URL(details.url);
-  if(!BANKS.has(u.hostname))return;
+  const u=captureUrl(details.url);
+  if(!u)return;
+  networkState.set(details.tabId,{status:details.statusCode,at:new Date().toISOString()});
+  if(details.statusCode<200||details.statusCode>=300)return;
   const id=details.tabId;
   const old=captures.get(id)||{};
   if(/\/social\/v1\/profile\/nickname\/[^/]+\/?$/.test(u.pathname)){
@@ -94,15 +123,29 @@ chrome.webRequest.onCompleted.addListener(async details=>{
     await chrome.storage.session.set({["instrument_tab_"+id]:u.href});
     chrome.tabs.sendMessage(id,{kind:"instrument_url",url:u.href}).catch(()=>{});
   }
-},{urls:["https://*.tbank.ru/mybank/api/*","https://*.tbank-online.com/mybank/api/*"]});
+},API_FILTER);
 
+chrome.webRequest.onErrorOccurred.addListener(details=>{
+  if(details.tabId<0||!captureUrl(details.url))return;
+  networkState.set(details.tabId,{error:String(details.error).slice(0,100),at:new Date().toISOString()});
+},API_FILTER);
+chrome.tabs.onUpdated.addListener((id,change)=>{
+  if(!change.url)return;
+  captures.delete(id);safeHeaders.delete(id);networkState.delete(id);
+  chrome.storage.session.remove(["nickname_tab_"+id,"instrument_tab_"+id,"safe_headers_"+id]).catch(()=>{});
+});
 chrome.tabs.onRemoved.addListener(id=>{
+  networkState.delete(id);
   captures.delete(id);safeHeaders.delete(id);
   chrome.storage.session.remove(["nickname_tab_"+id,"instrument_tab_"+id,"safe_headers_"+id]).catch(()=>{});
 });
 
 chrome.runtime.onMessage.addListener((message,sender,reply)=>{
   (async()=>{
+    if(message?.kind==="diagnostics"){
+      if(sender.tab)throw Error("Диагностика открывается через значок расширения");
+      return diagnostics();
+    }
     if(message?.kind==="config"){
       if(sender.tab&&!bankTab(sender))throw Error("Недопустимая страница");
       const data=await send({kind:"config"});
@@ -155,7 +198,8 @@ chrome.runtime.onMessage.addListener((message,sender,reply)=>{
     throw Error("Неизвестное действие расширения");
   })().then(data=>reply({ok:true,data}),error=>{
     chrome.storage.local.set({last_error:String(error?.message||error).slice(0,200)}).catch(()=>{});
-    reply({ok:false,error:String(error?.message||error).slice(0,200)});
+    reply({ok:false,error:String(error?.message||error).slice(0,200),
+      scope:error.scope,status:error.status,code:error.code});
   });
   return true;
 });

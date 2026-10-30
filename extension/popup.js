@@ -30,18 +30,22 @@ async function showRuntime(){
   if(current.portfolio_error) el("scan-info").textContent += " · Ошибка портфеля: "+current.portfolio_error;
   if(!current.enabled) status("⚠️ Передача сделок выключена. Поставь галочку и сохрани настройки.",true);
   else if(current.last_error) status("Ошибка передачи сделок: "+current.last_error,true);
-  else if(current.last_success_at) status("✅ Сделки передаются в админку. "+current.last_instrument_count+" инструментов.");
-  else status("Кабинет подключён по ключу, но данные ещё не получены. Открой сделки выбранного автора и обнови страницу F5.");
+  else if(current.last_success_at) status("Сохранён успешный отчёт: "+current.last_instrument_count+" инструментов. Текущее состояние каждой вкладки — в диагностике ниже.");
+  else status("Кабинет подключён по ключу, но данные ещё не получены. Открой сделки выбранного автора. Причина ожидания указана в диагностике.");
 }
 async function settings(){
   const endpoint=el("endpoint").value.trim().replace(/\/$/,"");
   if(!ALLOWED.has(endpoint)) throw Error("Допускается только адрес T-Invest Bot");
   if(!el("config").reportValidity()) throw Error("Проверь поля подключения");
-  const old=await chrome.storage.local.get("enabled");
+  const old=await chrome.storage.local.get(["enabled","endpoint","key"]);
   if(old.enabled && !el("enabled").checked) await request("stop");
   await chrome.storage.local.set({endpoint,
     key:el("key").value.trim(),interval:Number(el("interval").value),enabled:el("enabled").checked});
   await chrome.storage.local.remove(["profile_url","baselines"]);
+  if(old.endpoint!==endpoint || old.key!==el("key").value.trim())
+    await chrome.storage.local.remove(["scan_stage","scan_stage_at","last_success_at",
+      "last_instrument_count","last_error","last_status","last_sent_at",
+      "month_history_error","portfolio_status","portfolio_error"]);
   status("Настройки сохранены. Кабинет определяется по ключу; банковский вход не изменяется.");
 }
 async function checkConnection(){
@@ -51,6 +55,28 @@ async function checkConnection(){
   el("account-name").textContent=result.account_login||"Кабинет по ключу";
   return result;
 }
+async function showDiagnostics(){
+  try {
+    const data=await request("diagnostics");
+    const lines=["Версия: "+data.version];
+    if(!data.tabs.length) lines.push("Нет вкладки профиля на доверенном домене. Нажми «Открыть сделки автора». Поддерживаются tbank.ru и tbank-online.com (также www). Другие зеркала требуют проверки.");
+    for(const tab of data.tabs){
+      lines.push("",tab.page,"Доступ к сайту: "+(tab.allowed?"разрешён":"не разрешён — разреши доступ в настройках расширения"));
+      const s=tab.state;
+      if(!s) lines.push("Нет ответа от скрипта вкладки. После установки/обновления открой новую вкладку кнопкой «Открыть сделки автора». Проверь доступ расширения к сайту.");
+      else lines.push("Код: "+s.code+(s.http?" · HTTP "+s.http:""),s.stage+(s.message?" · "+s.message:""),
+        "Автор: "+(s.author||"не определён"),
+        "API автора / инструментов / подтверждение: "+[s.nickname,s.instrument,s.verified].map(v=>v?"да":"нет").join(" / "),
+        "Действие: "+s.step,"Проверка: "+(s.at?new Date(s.at).toLocaleTimeString("ru-RU"):"запускается"));
+      if(tab.network?.error) lines.push("Браузер: "+tab.network.error+
+        (tab.network.error.includes("CERT")?" — проверь сертификат по инструкции банка; не отключай проверку TLS":""));
+      else if(tab.network) lines.push("Последний HTTP перехвата: "+tab.network.status);
+    }
+    el("diagnostics").textContent=lines.join("\n");
+  } catch(error) {el("diagnostics").textContent="Диагностика недоступна: "+error.message;}
+}
+el("diagnose").addEventListener("click",showDiagnostics);
+showDiagnostics();
 el("config").addEventListener("submit",ev=>{
   ev.preventDefault();
   settings().then(checkConnection).then(showRuntime).catch(e=>status(e.message,true));

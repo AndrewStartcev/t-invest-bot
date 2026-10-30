@@ -38,6 +38,10 @@ jobs:
           node -e "const fs=require('fs'); const src=fs.readFileSync('demo/index.html','utf8'); const blocks=[...src.matchAll(/<script\\b[^>]*>([\\s\\S]*?)<\\/script>/g)]; for(const b of blocks) new Function(b[1]); if(!blocks.length) process.exit(1)"
       - name: Verify simulated Brave history loading
         run: node tests/test_extension_history.cjs
+      - name: Verify API discovery and MV3 capture regressions
+        run: |
+          node tests/test_extension_discovery.cjs
+          node tests/test_extension_capture.cjs
       - name: Validate browser-only source design
         run: |
           node -e "const fs=require('fs'); const content=fs.readFileSync('extension/content.js','utf8'); if(!content.includes('totalOperationsCount') || !content.includes('nextCursor') || !content.includes('verifyAuthor')) process.exit(1)"
