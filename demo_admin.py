@@ -1961,6 +1961,7 @@ class Handler(BaseHTTPRequestHandler):
                     raise ValueError("Отчёт расширения должен быть объектом")
                 if report == {"kind": "config"}:
                     current = EXTENSION_TRADES.accept({"status":"test"}, load_settings()["profile_url"])
+                    current["account_login"] = os.environ.get("TINVEST_CLIENT_USERNAME") or "admin"
                     self.respond(200, current)
                     return
                 if report.get("kind") == "portfolio":
