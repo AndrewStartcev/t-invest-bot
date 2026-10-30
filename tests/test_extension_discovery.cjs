@@ -20,14 +20,16 @@ async function browser(options={}){
       if(msg.kind==='report'){reports.push(msg.report);return cb({ok:true,data:{ok:true}});}
       throw Error(msg.kind);
     }}};
-  const ctx={chrome,location,URL,Date,AbortController,console,clearTimeout(){},
+  const ctx={chrome,location,URL,Date,AbortController,console,
+    performance:{getEntriesByType(){return (options.resources||[]).map(name=>({name}));}},clearTimeout(){},
     setTimeout(fn,ms){if(ms===5000||ms===15000)timers.push(fn);return 1;},
     async fetch(value,opts){
       const u=new URL(value);calls.push(u);
-      assert.equal(u.origin,location.origin);assert.equal(opts.redirect,'error');
+      assert.equal(u.origin,location.origin);assert.equal(opts.redirect,'manual');
       if(mode==='capture-race' && u.pathname.endsWith('/instrument')) {
         listener({kind:'instrument_url',url:location.origin+'/mybank/api/invest/social/v1/profile/uuid-Bob/instrument'},{});
       }
+      if(mode==='redirect')return {type:'opaqueredirect',ok:false,status:0};
       if(mode==='network')throw TypeError('Failed to fetch');
       if(mode==='navigate'){location.pathname='/invest/pulse/profile/Bob/operations/';mode='normal';}
       if(mode==='switch-key'){state.key='new-private-key';mode='normal';}
@@ -49,6 +51,17 @@ async function browser(options={}){
     assert.equal(b.calls.length,2,'bootstrap nickname + instrument without capture or F5');
     assert(!JSON.stringify(b.reports).includes('private-pairing'));
   }
+  const recovered=await browser({resources:[
+    'https://www.tbank.ru/mybank/api/invest/social/v1/profile/uuid-Alice/instrument?sessionId=local-secret']});
+  assert.equal(recovered.diag().code,'ok');assert.equal(recovered.calls[0].searchParams.get('sessionId'),'local-secret');
+  assert(!JSON.stringify(recovered.reports).includes('local-secret'));
+  assert(!JSON.stringify(recovered.diag()).includes('local-secret'));
+  const unknown=await browser({resources:['https://api.unknown.test/api/social/v1/profile/uuid-Alice/instrument?token=secret']});
+  assert(unknown.diag().observedApi.some(s=>s.includes('api.unknown.test')));
+  assert(!unknown.calls.some(u=>u.hostname==='api.unknown.test'));
+  const redirect=await browser({mode:'redirect'});
+  assert.equal(redirect.diag().code,'pulse_redirect');assert.equal(redirect.calls.length,1);
+  assert(!redirect.diag().request.includes('?'));assert(redirect.diag().request.endsWith('/nickname/Alice'),'preserve nickname case');
   const pair=await browser({mode:'pairing'});assert.equal(pair.diag().code,'dashboard_401');
   assert.equal(pair.calls.length,0);assert.equal(pair.reports.length,0,'pairing failure cannot log out bank');
   for(const mode of ['401','403','404','429','network','html']){

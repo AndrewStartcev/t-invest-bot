@@ -125,9 +125,21 @@ chrome.webRequest.onCompleted.addListener(async details=>{
   }
 },API_FILTER);
 
+chrome.webRequest.onBeforeRedirect.addListener(details=>{
+  if(details.tabId<0||!captureUrl(details.url))return;
+  // Keep query, fragment, credentials and target path out of diagnostics.
+  // Even an untrusted target may be displayed as a hostname, never followed.
+  let targetHost;
+  try {targetHost=new URL(details.redirectUrl).hostname;} catch {targetHost="неизвестен";}
+  networkState.set(details.tabId,{requestId:details.requestId,status:details.statusCode,
+    redirectHost:targetHost,requestPath:new URL(details.url).pathname,at:new Date().toISOString()});
+},API_FILTER);
 chrome.webRequest.onErrorOccurred.addListener(details=>{
   if(details.tabId<0||!captureUrl(details.url))return;
-  networkState.set(details.tabId,{error:String(details.error).slice(0,100),at:new Date().toISOString()});
+  const previous=networkState.get(details.tabId);
+  networkState.set(details.tabId,{...(previous?.requestId===details.requestId?previous:{}),
+    requestId:details.requestId,requestPath:new URL(details.url).pathname,
+    error:String(details.error).slice(0,100),at:new Date().toISOString()});
 },API_FILTER);
 chrome.tabs.onUpdated.addListener((id,change)=>{
   if(!change.url)return;

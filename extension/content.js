@@ -27,13 +27,15 @@
     return u;
   }
 
-  function selectedNickname(urlString) {
+  function pageNickname(urlString) {
     try {
       const u = new URL(urlString);
       const m = /^\/invest\/(?:social|pulse)\/profile\/([^/]+)\/?/.exec(u.pathname);
-      return m ? decodeURIComponent(m[1]).toLowerCase() : null;
+      return m ? decodeURIComponent(m[1]) : null;
     } catch { return null; }
   }
+
+  function selectedNickname(value) { return pageNickname(value)?.toLowerCase() || null; }
 
   function operationsTab() {
     return /^\/invest\/(?:social|pulse)\/profile\/[^/]+\/operations\/?$/.test(location.pathname);
@@ -65,6 +67,47 @@
     return "unavailable";
   }
 
+  function pageApiResources() {
+    // Resource Timing is readable in the isolated content world. Only names
+    // of already-loaded resources are used, never bodies or page JS state.
+    if(typeof performance === "undefined" || !performance.getEntriesByType)return [];
+    return performance.getEntriesByType("resource").flatMap(entry=>{
+      try {
+        const u=new URL(entry.name);
+        if(/\/social\/v1\/profile\/(?:nickname\/[^/]+|[^/]+\/instrument)\/?$/.test(u.pathname))return [u];
+      } catch {}
+      return [];
+    });
+  }
+  function recoverPageApi() {
+    for(const u of pageApiResources().reverse()) {
+      if(failedUrls.has(u.href))continue;
+      try {
+        checkedApi(u.href, /\/social\/v1\/profile\/(?:nickname\/[^/]+|[^/]+\/instrument)\/?$/);
+        if(!instrumentUrl && INSTRUMENT_PATH.test(u.pathname)) {
+          u.searchParams.delete("nextCursor");
+          if(!failedUrls.has(u.href))instrumentUrl=u.href;
+        } else if(!nicknameUrl && /\/nickname\//.test(u.pathname) &&
+            decodeURIComponent(u.pathname.replace(/\/$/, "").split("/").pop()).toLowerCase() === selectedNickname(location.href)) {
+          nicknameUrl=u.href;
+        }
+      } catch { /* Unknown hosts and routes are diagnostic hints only. */ }
+    }
+  }
+
+  async function fetchPulse(url, signal) {
+    const target=new URL(url);
+    diagnostic.request=target.origin+target.pathname;
+    diagnostic.requestAt=new Date().toISOString();
+    const response=await fetch(target.href, {
+      credentials:"include",cache:"no-store",redirect:"manual",signal,headers:safeHeaders
+    });
+    if(response.type === "opaqueredirect" || (response.status>=300 && response.status<400))
+      throw failure("pulse_redirect", "Банк перенаправляет запрос API",
+        "Проверь адрес перенаправления в диагностике и открываются ли сделки в самой вкладке. Не вводи данные на неизвестном домене");
+    return response;
+  }
+
   async function api(url, timeoutMs = 9000) {
     const target = new URL(url);
     if (!VALID_HOSTS.has(target.hostname) || target.origin !== location.origin)
@@ -72,10 +115,7 @@
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
-      const response = await fetch(target.href, {
-        credentials: "include", cache: "no-store", redirect:"error", signal: controller.signal,
-        headers: safeHeaders
-      });
+      const response = await fetchPulse(target.href, controller.signal);
       if (!response.ok) {
         const error = Error("API Пульса: HTTP " + response.status);
         error.status = response.status;
@@ -348,7 +388,7 @@
     let nickname = nicknameUrl
       ? checkedApi(nicknameUrl, /\/profile\/nickname\/[^/]+\/?$/)
       : new URL("/mybank/api/invest/social/v1/profile/nickname/" +
-          encodeURIComponent(selectedNickname(location.href)), location.origin);
+          encodeURIComponent(pageNickname(location.href)), location.origin);
     if(!nicknameUrl && instrumentUrl) {
       // A missed nickname request can reuse the observed API query locally.
       nickname.search = checkedApi(instrumentUrl, INSTRUMENT_PATH).search;
@@ -358,15 +398,13 @@
         !== selectedNickname(location.href)) {
       nicknameUrl = null; instrumentUrl = null;
       nickname = new URL("/mybank/api/invest/social/v1/profile/nickname/" +
-        encodeURIComponent(selectedNickname(location.href)), location.origin);
+        encodeURIComponent(pageNickname(location.href)), location.origin);
     }
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(),9000);
     const page = location.href, epoch = generation;
     try {
-      const response = await fetch(nickname.href, {
-        credentials:"include",cache:"no-store",redirect:"error",signal:controller.signal,headers:safeHeaders
-      });
+      const response = await fetchPulse(nickname.href, controller.signal);
       if (!response.ok) {
         throw Object.assign(Error("Автор Пульса: HTTP " + response.status),
           {status:response.status, scope:"pulse"});
@@ -441,6 +479,7 @@
         nicknameUrl=failedUrls.has(observed.nickname_url)?null:observed.nickname_url;
         safeHeaders=observed.headers||{};
       }
+      if(!instrumentUrl||!nicknameUrl)recoverPageApi();
       await setStage("Проверяем, что API относится к выбранному автору");
       await verifyAuthor();
       stillCurrent();
@@ -529,6 +568,9 @@
     if(message?.kind === "diagnose") {
       reply({code:diagnostic.code, stage:diagnostic.stage, step:diagnostic.step,
         at:diagnostic.at, message:diagnostic.message||"", http:diagnostic.http || null,
+        request:diagnostic.request||null, requestAt:diagnostic.requestAt||null,
+        observedApi:[...new Set(pageApiResources().map(u=>u.origin+" · "+
+          (INSTRUMENT_PATH.test(u.pathname)?"инструменты":"автор")))].slice(-8),
         page:location.origin+location.pathname, author:selectedNickname(location.href),
         operations:operationsTab(), instrument:!!instrumentUrl, nickname:!!nicknameUrl,
         verified:!!lastIdentityCheck, busy});

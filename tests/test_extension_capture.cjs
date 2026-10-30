@@ -11,7 +11,7 @@ assert(!manifest.host_permissions.some(s=>s.includes('*.')),'no unverified API s
 const saved={},sent=[],events={},tabs=[{id:7,url:'https://www.tbank.ru/invest/pulse/profile/Alice/operations/'}];
 function event(name){return {addListener(fn,filter){events[name]=fn;if(filter)assert.deepEqual(Array.from(filter.urls).sort(),hosts.map(h=>`https://${h}/mybank/api/*`).sort());}};}
 function worker(){
-  const chrome={webRequest:{onBeforeSendHeaders:event('headers'),onCompleted:event('complete'),onErrorOccurred:event('error')},
+  const chrome={webRequest:{onBeforeSendHeaders:event('headers'),onCompleted:event('complete'),onErrorOccurred:event('error'),onBeforeRedirect:event('redirect')},
     permissions:{async contains(){return true;}},
     storage:{local:{async get(){return {endpoint:'https://invest.argokov.ru',key:'x'.repeat(40),enabled:true};},async set(){}},
       session:{async get(keys){return Object.fromEntries(keys.map(k=>[k,saved[k]]));},async set(v){Object.assign(saved,v);},async remove(keys){for(const k of keys)delete saved[k];}}},
@@ -35,7 +35,14 @@ async function msg(message,sender={tab:tabs[0]}){
   assert.equal((await msg({kind:'get_instrument_url'})).data.instrument_url,captured.data.instrument_url);
   await events.complete({tabId:7,url:base.replace('www.tbank.ru','evil.test'),statusCode:200});
   assert.equal((await msg({kind:'get_instrument_url'})).data.instrument_url,captured.data.instrument_url);
-  await events.error({tabId:7,url:base,error:'net::ERR_CERT_AUTHORITY_INVALID'});
+  await events.redirect({tabId:7,requestId:'redirect-1',url:base,statusCode:302,
+    redirectUrl:'https://unknown.test/private/login?sessionId=private#secret'});
+  await events.error({tabId:7,requestId:'redirect-1',url:base,error:'net::ERR_ABORTED'});
+  const redirected=await msg({kind:'diagnostics'},{});
+  assert.equal(redirected.data.tabs[0].network.redirectHost,'unknown.test');
+  assert(!JSON.stringify(redirected).includes('sessionId'));
+  assert(!JSON.stringify(redirected).includes('/private/login'));
+  await events.error({tabId:7,requestId:'other',url:base,error:'net::ERR_CERT_AUTHORITY_INVALID'});
   const diag=await msg({kind:'diagnostics'},{});
   assert.equal(diag.data.tabs[0].state,null);assert(diag.data.tabs[0].network.error.includes('CERT'));
   assert(!JSON.stringify(diag).includes('private'),'diagnostics never exposes API query');

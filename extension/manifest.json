@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "T-Invest Pulse Browser Source",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "description": "Мониторинг сделок и чтение видимого портфеля Пульса через Яндекс Браузер / Brave без серверного входа",
   "minimum_chrome_version": "120",
   "permissions": [

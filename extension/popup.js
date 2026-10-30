@@ -66,8 +66,12 @@ async function showDiagnostics(){
       if(!s) lines.push("Нет ответа от скрипта вкладки. После установки/обновления открой новую вкладку кнопкой «Открыть сделки автора». Проверь доступ расширения к сайту.");
       else lines.push("Код: "+s.code+(s.http?" · HTTP "+s.http:""),s.stage+(s.message?" · "+s.message:""),
         "Автор: "+(s.author||"не определён"),
+        "Запрос: "+(s.request||"ещё не отправлен"),
         "API автора / инструментов / подтверждение: "+[s.nickname,s.instrument,s.verified].map(v=>v?"да":"нет").join(" / "),
         "Действие: "+s.step,"Проверка: "+(s.at?new Date(s.at).toLocaleTimeString("ru-RU"):"запускается"));
+      if(s?.observedApi?.length) lines.push("API, загруженные вкладкой: "+s.observedApi.join("; "));
+      if(tab.network?.redirectHost) lines.push("Редирект API: HTTP "+tab.network.status+" → хост "+tab.network.redirectHost+" (не выполнялся расширением)");
+      if(tab.network?.requestPath) lines.push("Сетевое событие: "+tab.network.requestPath+" · "+new Date(tab.network.at).toLocaleTimeString("ru-RU"));
       if(tab.network?.error) lines.push("Браузер: "+tab.network.error+
         (tab.network.error.includes("CERT")?" — проверь сертификат по инструкции банка; не отключай проверку TLS":""));
       else if(tab.network) lines.push("Последний HTTP перехвата: "+tab.network.status);
