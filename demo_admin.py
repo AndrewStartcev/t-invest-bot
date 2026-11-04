@@ -471,6 +471,35 @@ def pulse_or_legacy_authorized(settings, source_key=""):
     return AUTH.get("status") == "authenticated"
 
 
+def author_portfolio_required(signal, settings):
+    """Whether this order decision depends on the followed author's holdings."""
+    if not signal.get("_browser_source"):
+        return False
+    policy = settings.get("policy") or {}
+    if not policy.get("enabled"):
+        return False
+    return ((signal.get("side") == "buy" and policy.get("confirm_existing", False))
+            or (signal.get("side") == "sell" and policy.get("confirm_remaining", False)))
+
+
+def require_current_author_portfolio(signal, settings):
+    """Fail closed rather than treating missing, stale or changed holdings as zero."""
+    if not author_portfolio_required(signal, settings):
+        return
+    snapshot = EXTENSION_PORTFOLIO.public_snapshot(settings["profile_url"])
+    if snapshot.get("status") != "partial" or snapshot.get("fresh") is not True:
+        raise TradeError("Портфель автора недоступен или устарел. Обнови «Портфель → Компании»")
+    key = signal["ticker"] + ":" + signal["classCode"]
+    current = snapshot.get("positions", {}).get(key)
+    if not isinstance(current, dict) or current.get("status") != "verified":
+        raise TradeError("Позиция автора по активу не подтверждена; нельзя принимать решение")
+    previous = signal.get("investor_position", {})
+    if (previous.get("status") != "verified" or
+            any(previous.get(field) != current.get(field)
+                for field in ("present", "percent", "displayed_zero"))):
+        raise TradeError("Доля позиции автора изменилась; подготовь решение заново")
+
+
 def extension_record_trade(trade):
     """Reuse the existing client-selected demo/confirm/auto order flow.
 
@@ -507,13 +536,14 @@ def extension_record_trade(trade):
                       "asset_type": kind, "side": trade["action"],
                       "price": trade["averagePrice"], "currency": "",
                       "lot_size": 1 if kind in {"stock", "bond", "fund"} else None,
-                      "investor_position": position}
+                      "investor_position": position, "_browser_source": True}
             source_key = trade.get("_source_key")
             try:
                 if not isinstance(source_key, str) or not source_key.startswith("pulse:"):
                     raise TradeError("Источник сигнала не имеет подтверждённого идентификатора")
                 if kind not in {"stock", "bond", "fund", "future"}:
                     raise TradeError("Тип инструмента не поддерживается")
+                require_current_author_portfolio(signal, settings)
                 if settings["real_mode"] == "confirm":
                     reasons = approval_reasons(signal, settings["policy"])
                     row = queue_approval(event, signal, settings, source_key,
@@ -537,6 +567,7 @@ def extension_record_trade(trade):
                             plan, token = prepare_real(signal, settings)
                             if not extension_live_source_ready(load_settings()):
                                 raise TradeError("Источник устарел до отправки заявки")
+                            require_current_author_portfolio(signal, load_settings())
                             placed = place_real(plan, source_key, token)
                         event.update(real_status=placed["status"],
                                      trade="РЕАЛЬНО: заявка отправлена",
@@ -554,10 +585,12 @@ def extension_record_trade(trade):
                   "price": trade["averagePrice"], "currency": "",
                   "lot_size": 1 if kind in {"stock", "bond", "fund"} else None,
                   "investor_position": positions.get(
-                      trade["ticker"] + ":" + trade["classCode"], {"status": "unavailable"})}
+                      trade["ticker"] + ":" + trade["classCode"], {"status": "unavailable"}),
+                  "_browser_source": True}
         try:
             if kind not in {"stock", "bond", "fund", "future"}:
                 raise ValueError("Тип инструмента пока не поддерживается")
+            require_current_author_portfolio(signal, settings)
             reasons = approval_reasons(signal, settings["policy"])
             if reasons:
                 # Existing approval model handles demo decisions too.
@@ -839,6 +872,7 @@ def telegram_callback(query):
 
 
 def prepare_real(signal: dict, settings: dict) -> tuple[dict, str]:
+    require_current_author_portfolio(signal, settings)
     token, account_id = selected_trade_account()
     held = copied_lots(account_id, signal["ticker"], signal["classCode"], signal["side"])
     arguments = {"policy": settings["policy"]} if settings.get("policy", {}).get("position_cap_enabled") else {}
@@ -1964,7 +1998,9 @@ class Handler(BaseHTTPRequestHandler):
                     current["account_login"] = os.environ.get("TINVEST_CLIENT_USERNAME") or "admin"
                     self.respond(200, current)
                     return
-                if report.get("kind") == "portfolio":
+                if report.get("kind") == "portfolio_status":
+                    result = EXTENSION_PORTFOLIO.mark_unavailable(report, load_settings()["profile_url"])
+                elif report.get("kind") == "portfolio":
                     settings = load_settings()
                     snapshot = EXTENSION_TRADES.public_snapshot(settings["profile_url"])
                     if snapshot.get("last_status") != "ok" or not snapshot.get("instruments"):
