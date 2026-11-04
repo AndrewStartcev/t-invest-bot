@@ -45,7 +45,7 @@ class ExtensionPortfolioStore:
             saved = self._read()
         if saved.get("profile_url") != expected:
             return {**unavailable(expected, "Открой портфель выбранного автора: раздел «Компании»"),
-                    "fresh": False, "last_success_at": None}
+                    "checked_at": None, "fresh": False, "last_success_at": None}
         checked = saved.get("checked_at")
         age = None
         try:
@@ -57,13 +57,15 @@ class ExtensionPortfolioStore:
             pass
         if saved.get("availability") == "error":
             result = unavailable(expected, saved.get("last_error") or "Не удалось прочитать портфель")
-            result.update(status="error", fresh=False, last_success_at=checked)
+            result.update(status="error", checked_at=checked,
+                          fresh=False, last_success_at=checked)
             return result
         if (saved.get("status") != "partial" or age is None or age < 0
                 or age > PORTFOLIO_MAX_AGE_SECONDS):
             result = unavailable(expected, "Портфель устарел. Обнови раздел «Компании» в браузере")
             result.update(status="stale" if saved.get("status") == "partial" else "unavailable",
-                          fresh=False, last_success_at=checked, age_seconds=age)
+                          checked_at=checked, fresh=False,
+                          last_success_at=checked, age_seconds=age)
             return result
         return {**saved, "fresh": True, "last_success_at": checked, "age_seconds": int(age)}
 
