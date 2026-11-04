@@ -6,7 +6,10 @@
 (() => {
   const visible = node => Boolean(node?.getClientRects().length) &&
     getComputedStyle(node).visibility !== "hidden";
-  let lastSignature = "", lastReport = 0, busy = false;
+  // A successful browser read stays fresh server-side for at most 180s.
+  // Send another verified snapshot every 60s even if the weights are unchanged.
+  const REFRESH_INTERVAL_MS = 60000;
+  let lastSignature = "", lastReport = 0, lastFailure = "", busy = false;
   function extract(){
     const headings=[...document.querySelectorAll("h1,h2,h3,[role=heading]")].filter(visible);
     const named = headings.find(h=>/[.\s:—–-]+портфель/i.test(h.innerText.trim()));
@@ -60,32 +63,62 @@
     try{
       const cfg=await chrome.storage.local.get("enabled");
       if(!cfg.enabled)return;
-      const screen=extract();
-      if(!screen)return;
+      const match=location.pathname.match(
+        /^\/invest\/(?:social|pulse)\/profile\/([^/]+)(?:\/portfolio|\/operations)?\/?$/);
+      if(!match)return;
       const config=await chrome.runtime.sendMessage({kind:"config"});
-      if(!config?.ok) return;
-      const selected=new URL(config.data.profile_url).pathname.split("/").filter(Boolean).pop();
-      const opened=location.pathname.match(/\/profile\/([^/]+)/)?.[1];
-      if(!selected||!opened||decodeURIComponent(selected).toLowerCase()!==
-         decodeURIComponent(opened).toLowerCase())return;
+      if(!config?.ok){
+        await chrome.storage.local.set({portfolio_error:
+          "Нет связи с кабинетом: "+String(config?.error||"неверный ключ").slice(0,140)});
+        return;
+      }
+      const selected=decodeURIComponent(new URL(config.data.profile_url)
+        .pathname.split("/").filter(Boolean).pop()).toLowerCase();
+      const opened=decodeURIComponent(match[1]).toLowerCase();
+      if(selected!==opened)return;
+      const screen=extract();
+      if(!screen){
+        // Do not invalidate from an ordinary Pulse operations tab.
+        // Only a visible portfolio/companies view that failed parsing can
+        // actively invalidate the previous result.
+        const active=[...document.querySelectorAll('[role="tab"][aria-selected="true"],button[aria-selected="true"]')]
+          .some(node=>visible(node)&&/^Компании$/i.test((node.innerText||"").trim()));
+        const heading=[...document.querySelectorAll('h1,h2,h3,[role="heading"]')]
+          .some(node=>visible(node)&&/портфель/i.test(node.innerText||""));
+        if(active&&heading&&lastFailure!=="unrecognized"){
+          const response=await chrome.runtime.sendMessage({kind:"portfolio_status",
+            report:{kind:"portfolio_status",profile_url:config.data.profile_url,
+              reason:"unrecognized"}});
+          if(response?.ok)lastFailure="unrecognized";
+        }
+        await chrome.storage.local.set({portfolio_status:
+          active&&heading?"Портфель открыт, но позиции пока не распознаны":
+          "Для обновления портфеля держи открытым раздел «Портфель → Компании»"});
+        return;
+      }
       const signature=JSON.stringify(screen);
-      if(signature===lastSignature&&Date.now()-lastReport<180000)return;
+      if(signature===lastSignature && Date.now()-lastReport<REFRESH_INTERVAL_MS)return;
       const result=await chrome.runtime.sendMessage({kind:"portfolio",
         report:{kind:"portfolio",profile_url:config.data.profile_url,screen}});
       if(result?.ok){
         lastSignature=signature;
         lastReport=Date.now();
-        await chrome.storage.local.set({portfolio_status:"Портфель: "+
-          result.data.rows+" строк, "+result.data.positions+" позиций",
+        lastFailure="";
+        await chrome.storage.local.set({portfolio_status:"Портфель обновлён: "+
+          result.data.rows+" строк, "+result.data.positions+" подтверждённых позиций",
           portfolio_last_ok:new Date().toISOString(),portfolio_error:""});
       }else{
         await chrome.storage.local.set({portfolio_error:String(result?.error||
           "Не удалось передать портфель").slice(0,200)});
       }
     }catch(error){
+      // A disconnected browser is not evidence of an empty portfolio.
+      // The server's 180s freshness timeout will revoke cached positions.
       await chrome.storage.local.set({portfolio_error:String(error.message||error).slice(0,200)});
     }finally{busy=false;}
   }
   setTimeout(scan,2000);
   setInterval(scan,15000);
+  document.addEventListener("visibilitychange",()=>{if(!document.hidden)scan();});
+  window.addEventListener("pageshow",scan);
 })();
