@@ -779,6 +779,7 @@ def refresh_approval(nonce):
             raise ValueError("Реальная торговля выключена")
         if any(row["source_key"] == original["source_key"] for row in REAL_ORDERS.values()):
             raise ValueError("Заявка уже отправлялась; нужна сверка с брокером")
+        require_current_author_portfolio(original["signal"], settings)
         APPROVALS.finish(nonce, "replaced")
         event = {"time": datetime.now(timezone.utc).isoformat(), "source": "operator_refresh",
                  "source_key": original["source_key"], "instrument": original["signal"]["ticker"],
@@ -827,6 +828,7 @@ def decide_approval(nonce, action):
                     event.update(trade="РЕАЛЬНО: заявка отправлена", real_status=order["status"],
                                  quantity=plan["quantity"], amount_rub=plan["estimated_rub"])
                 else:
+                    require_current_author_portfolio(row["signal"], settings)
                     with LOCK:
                         current = POSITIONS.get(row["signal"]["ticker"] + ":" + row["signal"]["classCode"], {})
                         if current != row["plan"].get("position_before", {}):
@@ -984,9 +986,15 @@ def real_signal(source_id: str) -> tuple[dict, str, dict | None]:
             raise TradeError("Для прошлой сделки доступна только покупка поддерживаемого инструмента")
         if datetime.fromisoformat(candidate["tradeDateTime"]) < datetime.now(timezone.utc) - timedelta(days=1):
             raise TradeError("Сделка старше 24 часов")
-        return ({"ticker": candidate["ticker"], "classCode": candidate["classCode"],
-                 "asset_type": candidate["asset_type"], "side": "buy"},
-                ("browser-historic:" if source_id.startswith("extension:") else "historic:") + source_id, None)
+        signal = {"ticker": candidate["ticker"], "classCode": candidate["classCode"],
+                  "asset_type": candidate["asset_type"], "side": "buy"}
+        if source_id.startswith("extension:"):
+            settings = load_settings()
+            portfolio = EXTENSION_PORTFOLIO.public_snapshot(settings["profile_url"])
+            signal["_browser_source"] = True
+            signal["investor_position"] = portfolio.get("positions", {}).get(
+                candidate["ticker"] + ":" + candidate["classCode"], {"status":"unavailable"})
+        return signal, ("browser-historic:" if source_id.startswith("extension:") else "historic:") + source_id, None
     if event:
         if event.get("real_status") not in {"awaiting_approval", "blocked"}:
             raise TradeError("Эта сделка уже обработана")
