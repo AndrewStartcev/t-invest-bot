@@ -2327,10 +2327,19 @@ class Handler(BaseHTTPRequestHandler):
                         "side": "buy", "price": f"{candidate['price']} {candidate['currency'] or ''}",
                         "source": "historic_demo", "source_event_id": candidate_id,
                     }
-                    apply_demo(event, {"ticker": candidate["ticker"], "classCode": candidate["classCode"],
-                                       "name": candidate["name"], "asset_type": candidate.get("asset_type") or "stock",
-                                       "side": "buy", "price": candidate["price"], "currency": candidate["currency"],
-                                       "lot_size": 1}, load_settings())
+                    settings = load_settings()
+                    signal = {"ticker": candidate["ticker"], "classCode": candidate["classCode"],
+                              "name": candidate["name"], "asset_type": candidate.get("asset_type") or "stock",
+                              "side": "buy", "price": candidate["price"], "currency": candidate["currency"],
+                              "lot_size": 1}
+                    if browser_candidate is not None:
+                        portfolio = EXTENSION_PORTFOLIO.public_snapshot(settings["profile_url"])
+                        signal["_browser_source"] = True
+                        signal["investor_position"] = portfolio.get("positions", {}).get(
+                            candidate["ticker"] + ":" + candidate["classCode"],
+                            {"status": "unavailable"})
+                    require_current_author_portfolio(signal, settings)
+                    apply_demo(event, signal, settings)
                     event["assumption"] = "Условный лот 1 единица; реальный размер лота не проверен"
                     add_event(event)
                 settings = load_settings()
