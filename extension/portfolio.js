@@ -90,7 +90,11 @@
           const response=await chrome.runtime.sendMessage({kind:"portfolio_status",
             report:{kind:"portfolio_status",profile_url:config.data.profile_url,
               reason:"unrecognized"}});
-          if(response?.ok)lastFailure="unrecognized";
+          if(response?.ok){
+            lastFailure="unrecognized";
+            lastSignature="";
+            lastReport=0;
+          }
         }
         await chrome.storage.local.set({portfolio_status:
           active&&heading?"Портфель открыт, но позиции пока не распознаны":
