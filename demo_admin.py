@@ -824,6 +824,7 @@ def decide_approval(nonce, action):
                             or hashlib.sha256(token.encode()).hexdigest() != row["token_hash"]
                             or not schedule_open(settings) or not pulse_or_legacy_authorized(settings, row["source_key"])):
                         raise ValueError("Подтверждение, расписание или источник изменились во время расчёта")
+                    require_current_author_portfolio(row["signal"], load_settings())
                     order = place_real(plan, row["source_key"], token)
                     event.update(trade="РЕАЛЬНО: заявка отправлена", real_status=order["status"],
                                  quantity=plan["quantity"], amount_rub=plan["estimated_rub"])
@@ -1050,6 +1051,7 @@ def confirm_real_preview(preview_id: str) -> dict:
             original = preview["plan"]
             if plan_identity(plan) != plan_identity(original):
                 raise TradeError("Цена или доступное количество изменились; проверь заявку заново")
+            require_current_author_portfolio(signal, load_settings())
             order = place_real(plan, source_key, token)
     except TradeError as error:
         alert_trade_failure(source_key, signal, str(error))
