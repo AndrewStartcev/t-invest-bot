@@ -9,7 +9,7 @@
   // A successful browser read stays fresh server-side for at most 180s.
   // Send another verified snapshot every 60s even if the weights are unchanged.
   const REFRESH_INTERVAL_MS = 60000;
-  let lastSignature = "", lastReport = 0, lastFailure = "", busy = false;
+  let lastSignature = "", lastReport = 0, lastFailure = "", invalidReads = 0, busy = false;
   function extract(){
     const headings=[...document.querySelectorAll("h1,h2,h3,[role=heading]")].filter(visible);
     const named = headings.find(h=>/[.\s:—–-]+портфель/i.test(h.innerText.trim()));
@@ -85,7 +85,8 @@
           .some(node=>visible(node)&&/^Компании$/i.test((node.innerText||"").trim()));
         const heading=[...document.querySelectorAll('h1,h2,h3,[role="heading"]')]
           .some(node=>visible(node)&&/портфель/i.test(node.innerText||""));
-        if(active&&heading&&lastFailure!=="unrecognized"){
+        invalidReads = active&&heading ? invalidReads+1 : 0;
+        if(invalidReads>=2&&lastFailure!=="unrecognized"){
           const response=await chrome.runtime.sendMessage({kind:"portfolio_status",
             report:{kind:"portfolio_status",profile_url:config.data.profile_url,
               reason:"unrecognized"}});
@@ -96,6 +97,7 @@
           "Для обновления портфеля держи открытым раздел «Портфель → Компании»"});
         return;
       }
+      invalidReads=0;
       const signature=JSON.stringify(screen);
       if(signature===lastSignature && Date.now()-lastReport<REFRESH_INTERVAL_MS)return;
       const result=await chrome.runtime.sendMessage({kind:"portfolio",
