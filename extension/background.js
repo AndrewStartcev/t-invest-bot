@@ -191,9 +191,9 @@ chrome.runtime.onMessage.addListener((message,sender,reply)=>{
         nickname_url:cached.nickname_url||saved["nickname_tab_"+id]||null,
         headers:safeHeaders.get(id)||saved["safe_headers_"+id]||{}};
     }
-    if(message?.kind==="portfolio") {
+    if(message?.kind==="portfolio"||message?.kind==="portfolio_status") {
       if(!bankTab(sender))throw Error("Портфель читается только из выбранного профиля Пульса");
-      if(message.report?.kind!=="portfolio")throw Error("Неверный формат портфеля");
+      if(message.report?.kind!==message.kind)throw Error("Неверный формат портфеля");
       const profile=checkedProfile((await send({kind:"config"})).profile_url);
       const opened=new URL(sender.tab.url).pathname.match(/\/profile\/([^/]+)/)?.[1];
       const selected=profile.pathname.split("/").filter(Boolean).pop();
