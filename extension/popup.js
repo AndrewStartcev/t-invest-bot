@@ -15,7 +15,7 @@ function request(kind){
 }
 async function showRuntime(){
   const current=await chrome.storage.local.get([
-    "enabled","scan_stage","scan_stage_at","last_success_at","last_instrument_count","last_error","month_history_error","portfolio_status","portfolio_error"
+    "enabled","scan_stage","scan_stage_at","last_success_at","last_instrument_count","last_error","month_history_error","portfolio_status","portfolio_error","portfolio_last_ok"
   ]);
   const time=current.last_success_at
     ? " · последний успешный отчёт: "+new Date(current.last_success_at).toLocaleTimeString("ru-RU")
@@ -26,7 +26,16 @@ async function showRuntime(){
   if(current.month_history_error && current.enabled) {
     el("scan-info").textContent += " · "+current.month_history_error;
   }
-  if(current.portfolio_status) el("scan-info").textContent += " · "+current.portfolio_status;
+  const portfolioAge = current.portfolio_last_ok
+    ? Date.now()-Date.parse(current.portfolio_last_ok) : Infinity;
+  if(current.portfolio_status){
+    el("scan-info").textContent += " · "+current.portfolio_status;
+    if(portfolioAge>180000)el("scan-info").textContent +=
+      " · Портфель устарел: открой «Компании», зависимые решения заблокированы";
+    else if(Number.isFinite(portfolioAge))
+      el("scan-info").textContent += " · проверено "+
+        Math.floor(Math.max(0,portfolioAge)/1000)+" сек. назад";
+  }
   if(current.portfolio_error) el("scan-info").textContent += " · Ошибка портфеля: "+current.portfolio_error;
   if(!current.enabled) status("⚠️ Передача сделок выключена. Поставь галочку и сохрани настройки.",true);
   else if(current.last_error) status("Ошибка передачи сделок: "+current.last_error,true);
