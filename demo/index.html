@@ -648,6 +648,9 @@
     el('instrument-search').addEventListener('input',()=>{instrumentLimit=60;renderInstruments();});
     function authorPortfolioView(state){
       const p=state.investor_portfolio||{},m=state.monitor||{};
+      if(p.status==='stale'||p.status==='error')return {rows:[],
+        message:(p.status==='stale'?'Портфель устарел':'Ошибка проверки портфеля')+' · '+(p.message||'Открой «Портфель → Компании»'),
+        empty:'Данные предыдущего снимка не используются для решений по позициям. Открой вкладку «Компании» в браузере автора.'};
       if(state.auth.status!=='authenticated')return {rows:[],message:'Ждём подключения Пульса',empty:'Портфель появится после подключения и проверки автора.'};
       if(p.profile_url&&p.profile_url!==state.settings.profile_url)return {rows:[],message:'Проверяем портфель выбранного автора',empty:'Загружаем позиции нового автора.'};
       const rows=p.rows||[];
@@ -657,7 +660,10 @@
     }
     function renderInvestorPortfolio(state){
       const portfolio=state.investor_portfolio||{};
-      el('investor-portfolio-status').textContent='Портфель '+(state.settings.profile_url.split('/profile/')[1]?.split('/')[0]||'выбранного автора')+' · '+(portfolio.message||'Портфель автора ещё не проверен')+(portfolio.checked_at?' · '+fmtDate(portfolio.checked_at):'');
+      el('investor-portfolio-status').textContent='Портфель '+(state.settings.profile_url.split('/profile/')[1]?.split('/')[0]||'выбранного автора')+
+        ' · '+(portfolio.message||'Портфель автора ещё не проверен')+
+        (portfolio.last_success_at?' · последний подтверждённый снимок: '+fmtDate(portfolio.last_success_at):'')+
+        (portfolio.fresh?' · актуален':' · не используется для зависимых торговых решений');
       const view=authorPortfolioView(state);
       el('overview-portfolio-status').textContent=view.message;
       el('overview-portfolio-count').textContent=view.rows.length?view.rows.length+' позиций':'Ждём данные';
